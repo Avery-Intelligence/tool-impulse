@@ -1,0 +1,97 @@
+{
+  "name": "tool-impulse",
+  "version": "1.0.0",
+  "description": "Fast in-memory dynamic tool router for LLM agents (BM25 + vector hybrid)",
+  "keywords": [
+    "agents",
+    "tools",
+    "tool-routing",
+    "tool-retrieval",
+    "ai-sdk",
+    "langchain",
+    "bm25",
+    "llm"
+  ],
+  "author": "Avery Intelligence",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Avery-Intelligence/tool-impulse.git"
+  },
+  "homepage": "https://github.com/Avery-Intelligence/tool-impulse#readme",
+  "bugs": {
+    "url": "https://github.com/Avery-Intelligence/tool-impulse/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./adapters/ai-sdk": {
+      "types": "./dist/adapters/ai-sdk.d.ts",
+      "default": "./dist/adapters/ai-sdk.js"
+    },
+    "./adapters/openai": {
+      "types": "./dist/adapters/openai.d.ts",
+      "default": "./dist/adapters/openai.js"
+    },
+    "./adapters/langchain": {
+      "types": "./dist/adapters/langchain.d.ts",
+      "default": "./dist/adapters/langchain.js"
+    },
+    "./adapters/mcp": {
+      "types": "./dist/adapters/mcp.d.ts",
+      "default": "./dist/adapters/mcp.js"
+    },
+    "./adapters/gemini": {
+      "types": "./dist/adapters/gemini.d.ts",
+      "default": "./dist/adapters/gemini.js"
+    },
+    "./adapters/grok": {
+      "types": "./dist/adapters/grok.d.ts",
+      "default": "./dist/adapters/grok.js"
+    },
+    "./adapters/cloudflare": {
+      "types": "./dist/adapters/cloudflare.d.ts",
+      "default": "./dist/adapters/cloudflare.js"
+    },
+    "./adapters/anthropic": {
+      "types": "./dist/adapters/anthropic.d.ts",
+      "default": "./dist/adapters/anthropic.js"
+    },
+    "./embedders/openai": {
+      "types": "./dist/embedders/openai.d.ts",
+      "default": "./dist/embedders/openai.js"
+    },
+    "./embedders/gemini": {
+      "types": "./dist/embedders/gemini.d.ts",
+      "default": "./dist/embedders/gemini.js"
+    },
+    "./embedders/cloudflare": {
+      "types": "./dist/embedders/cloudflare.d.ts",
+      "default": "./dist/embedders/cloudflare.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "eval": "tsx evals/eval-suite.ts",
+    "benchmark": "tsx evals/benchmark.ts",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
