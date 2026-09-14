@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ToolImpulseEngine } from '../src/core/engine.js';
 import { createAiSdkImpulseMiddleware } from '../src/adapters/ai-sdk.js';
 import { createMcpFilter, mcpToImpulseTool, impulseToMcpTool } from '../src/adapters/mcp.js';
+import { createLangChainImpulseRetriever } from '../src/adapters/langchain.js';
 
 describe('Adapters', () => {
   it('Vercel AI SDK middleware filters tools record per query', async () => {
@@ -39,5 +40,20 @@ describe('Adapters', () => {
     expect(impulseTool.name).toBe('jira_issues');
     const backToMcp = impulseToMcpTool(impulseTool);
     expect(backToMcp.name).toBe('jira_issues');
+  });
+
+  it('LangChain retriever filters tools dynamically', async () => {
+    const engine = new ToolImpulseEngine();
+    const lcTools = [
+      { name: 'slack_send', description: 'Post chat message to Slack channel' },
+      { name: 'stripe_refund', description: 'Issue refund for credit card charge' },
+      { name: 'github_merge', description: 'Merge GitHub pull request' },
+    ];
+
+    const retriever = createLangChainImpulseRetriever(engine, lcTools, { topK: 1 });
+    const { tools } = await retriever.getTools('Refund customer credit card in Stripe');
+
+    expect(tools.length).toBe(1);
+    expect(tools[0].name).toBe('stripe_refund');
   });
 });

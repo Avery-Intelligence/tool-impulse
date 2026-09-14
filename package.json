@@ -1,6 +1,6 @@
 {
   "name": "tool-impulse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tool Impulse Engine: Unconscious Perceptual Reflex for Autonomous Agent Tool Retrieval",
   "keywords": [
     "agents",
@@ -9,9 +9,11 @@
     "tool-retrieval",
     "llm",
     "ai-sdk",
+    "langchain",
     "reflex",
     "submodular",
-    "spreading-activation"
+    "spreading-activation",
+    "quantization"
   ],
   "author": "Avery Intelligence",
   "license": "MIT",
@@ -30,6 +32,22 @@
     "./adapters/mcp": {
       "types": "./dist/adapters/mcp.d.ts",
       "default": "./dist/adapters/mcp.js"
+    },
+    "./adapters/langchain": {
+      "types": "./dist/adapters/langchain.d.ts",
+      "default": "./dist/adapters/langchain.js"
+    },
+    "./core/quantization": {
+      "types": "./dist/core/quantization.d.ts",
+      "default": "./dist/core/quantization.js"
+    },
+    "./core/topology": {
+      "types": "./dist/core/topology.d.ts",
+      "default": "./dist/core/topology.js"
+    },
+    "./core/speculative": {
+      "types": "./dist/core/speculative.d.ts",
+      "default": "./dist/core/speculative.js"
     }
   },
   "bin": {
