@@ -45,8 +45,8 @@ As agents evolve from demos to production, they acquire dozens of tools across m
 * 🔄 **Trajectory Blending (Pronoun Shifts):** Seamlessly handles multi-turn anaphora (*"Now bill them for the overdue balance"*) by blending the prior turn vector ($\beta = 0.75$).
 * 🔗 **Companion Tool Graph:** Automatically mounts dependent workflow tools (e.g., pulling `jira_update_issue` when `jira_get_issue` is retrieved) using an in-memory transition graph.
 * 🌐 **Family Diversity Capping:** Prevents a single tool provider (e.g. 20 Stripe tools) from monopolizing the context window, reserving space for communication and issue tracking tools.
-* 🔌 **First-Class Framework Adapters:** Out-of-the-box middleware for **Vercel AI SDK**, **LangChain**, and **Model Context Protocol (MCP)**.
-* 📦 **Zero Mandatory Dependencies:** Pure TypeScript / JavaScript standard library.
+* 🔌 **First-Class Ecosystem Adapters:** Out-of-the-box adapters for **Google Gemini (`@google/genai`)**, **xAI Grok (`grok-2/3`)**, **Cloudflare Workers**, **Vercel AI SDK**, **LangChain**, and **MCP**.
+* 📦 **Zero Mandatory Dependencies:** Pure TypeScript / JavaScript standard library. Runs anywhere (Node.js, Bun, Cloudflare Workers, Edge runtimes).
 
 ---
 
@@ -58,30 +58,103 @@ As agents evolve from demos to production, they acquire dozens of tools across m
 npm install tool-impulse
 ```
 
-### 2. Vercel AI SDK Middleware
+---
+
+### 2. Google Gemini (`@google/genai` / `@google/generative-ai`)
+
+Prunes Gemini's `functionDeclarations` down to active tools, slashing TTFT and preventing argument hallucination:
 
 ```typescript
-import { ToolImpulseEngine, createAiSdkImpulseMiddleware } from 'tool-impulse';
+import { GoogleGenAI } from '@google/genai';
+import { ToolImpulse, createGeminiToolFilter } from 'tool-impulse';
+
+const engine = new ToolImpulse();
+const gemini = createGeminiToolFilter(engine, { topK: 3 });
+
+// Automatically formats { tools: [{ functionDeclarations: [...] }] }
+const { tools } = await gemini.formatTools("Check unpaid invoices for Acme Corp", allFunctionDeclarations);
+
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const response = await ai.models.generateContent({
+  model: 'gemini-2.5-flash',
+  contents: "Check unpaid invoices for Acme Corp",
+  config: { tools },
+});
+```
+
+---
+
+### 3. xAI Grok (Native API / OpenAI SDK)
+
+```typescript
+import OpenAI from 'openai';
+import { ToolImpulse, createGrokToolFilter } from 'tool-impulse';
+
+const xai = new OpenAI({
+  apiKey: process.env.XAI_API_KEY,
+  baseURL: 'https://api.x.ai/v1',
+});
+
+const engine = new ToolImpulse();
+const grok = createGrokToolFilter(engine, { topK: 3 });
+
+// Mount only the relevant tools into Grok's context window
+const { tools } = await grok.filterTools("Find recent critical bug reports in Jira", allGrokTools);
+
+const response = await xai.chat.completions.create({
+  model: 'grok-2',
+  messages: [{ role: 'user', content: "Find recent critical bug reports in Jira" }],
+  tools,
+});
+```
+
+---
+
+### 4. Cloudflare Workers & Workers AI
+
+Runs inside Cloudflare V8 Isolates with **0ms cold start** and zero bundle bloat:
+
+```typescript
+import { ToolImpulse, createCloudflareAiFilter } from 'tool-impulse';
+
+export default {
+  async fetch(request: Request, env: Env) {
+    const engine = new ToolImpulse();
+    const cf = createCloudflareAiFilter(engine, { topK: 3 });
+
+    const { prompt } = await request.json();
+    const { tools } = await cf.filterTools(prompt, allWorkerTools);
+
+    const response = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
+      prompt,
+      tools,
+    });
+    return Response.json(response);
+  },
+};
+```
+
+---
+
+### 5. Vercel AI SDK Middleware
+
+```typescript
+import { ToolImpulse, createToolRouter } from 'tool-impulse';
 import { generateText } from 'ai';
 import { openai } from '@ai-sdk/openai';
 
-const engine = new ToolImpulseEngine();
-const impulse = createAiSdkImpulseMiddleware(engine, { topK: 3, maxPerFamily: 2 });
+const engine = new ToolImpulse();
+const router = createToolRouter(engine, { topK: 3, maxPerDomain: 2 });
 
-// All your tools across all services (50+ tools)
 const allTools = {
-  stripe_list_invoices: { description: 'List customer billing invoices', execute: async () => {} },
-  stripe_charge_customer: { description: 'Charge a customer credit card', execute: async () => {} },
-  jira_search_issues: { description: 'Search Jira tickets and bugs', execute: async () => {} },
-  jira_update_issue: { description: 'Update Jira issue fields', execute: async () => {} },
-  slack_send_message: { description: 'Send a Slack message to a channel', execute: async () => {} },
-  // ... 50 more tools
+  stripe_list_invoices: { description: 'List billing invoices', execute: async () => {} },
+  jira_search_issues: { description: 'Search Jira tickets', execute: async () => {} },
+  slack_send_message: { description: 'Send Slack message', execute: async () => {} },
+  // ... 50+ more tools
 };
 
-// Filter tools dynamically before the LLM prompt is assembled
-const { tools } = await impulse.getTools("Check pending invoices for Acme Corp", allTools);
+const { tools } = await router.getTools("Check pending invoices for Acme Corp", allTools);
 
-// Only the top 3 relevant tools are mounted in context
 const response = await generateText({
   model: openai('gpt-4o'),
   prompt: "Check pending invoices for Acme Corp",
@@ -91,15 +164,14 @@ const response = await generateText({
 
 ---
 
-### 3. LangChain & LangGraph
+### 6. LangChain & LangGraph
 
 ```typescript
-import { ToolImpulseEngine, createLangChainImpulseRetriever } from 'tool-impulse';
+import { ToolImpulse, createLangChainRetriever } from 'tool-impulse';
 
-const engine = new ToolImpulseEngine();
-const retriever = createLangChainImpulseRetriever(engine, myAllTools, { topK: 3 });
+const engine = new ToolImpulse();
+const retriever = createLangChainRetriever(engine, myAllTools, { topK: 3 });
 
-// Dynamically retrieve relevant tools during agent planning
 const { tools } = await retriever.getTools("Refund the customer credit card in Stripe");
 ```
 

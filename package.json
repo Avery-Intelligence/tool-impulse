@@ -33,6 +33,18 @@
     "./adapters/mcp": {
       "types": "./dist/adapters/mcp.d.ts",
       "default": "./dist/adapters/mcp.js"
+    },
+    "./adapters/gemini": {
+      "types": "./dist/adapters/gemini.d.ts",
+      "default": "./dist/adapters/gemini.js"
+    },
+    "./adapters/grok": {
+      "types": "./dist/adapters/grok.d.ts",
+      "default": "./dist/adapters/grok.js"
+    },
+    "./adapters/cloudflare": {
+      "types": "./dist/adapters/cloudflare.d.ts",
+      "default": "./dist/adapters/cloudflare.js"
     }
   },
   "files": [
