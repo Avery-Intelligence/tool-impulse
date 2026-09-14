@@ -1,68 +1,51 @@
-import { ImpulseTool, ToolTransitionEdge } from './types.js';
-import { Int8Quantizer, QuantizedVector } from './quantization.js';
+import { ToolDefinition, ToolTransitionEdge } from './types.js';
 
-export interface BankToolEntry {
-  tool: ImpulseTool;
+export interface ToolCatalogEntry {
+  tool: ToolDefinition;
   embedding?: Float32Array;
-  quantized?: QuantizedVector;
-  norm: number;
 }
 
-export interface ImpulseBankConfig {
-  /** Enable Int8 scalar quantization to reduce vector memory by 75% */
-  quantizeInt8?: boolean;
-}
-
-export class ImpulseBank {
-  private entries: Map<string, BankToolEntry> = new Map();
+export class ToolCatalog {
+  private entries: Map<string, ToolCatalogEntry> = new Map();
   private toolNames: string[] = [];
   private graph: Map<string, Map<string, number>> = new Map();
-  private observationCounts: Map<string, Map<string, number>> = new Map();
+  private transitionCounts: Map<string, Map<string, number>> = new Map();
   private dimension: number = 0;
-  private quantizeInt8: boolean;
-
-  constructor(config: ImpulseBankConfig = {}) {
-    this.quantizeInt8 = !!config.quantizeInt8;
-  }
 
   /**
-   * Register tools into the in-memory bank.
+   * Register tools into the in-memory catalog.
    */
-  public registerTools(tools: ImpulseTool[]): void {
+  public registerTools(tools: ToolDefinition[]): void {
     for (const tool of tools) {
       if (!this.entries.has(tool.name)) {
         this.toolNames.push(tool.name);
       }
-      this.entries.set(tool.name, {
-        tool,
-        norm: 1.0,
-      });
 
-      // Auto-extract family if not provided (e.g. "stripe_charge" -> "stripe")
-      if (!tool.family) {
-        const parts = tool.name.split('_');
-        tool.family = parts.length > 1 ? parts[0] : 'default';
+      // Auto-extract domain prefix if not provided (e.g. "stripe_charge" -> "stripe")
+      if (!tool.domain) {
+        tool.domain = tool.family || (tool.name.includes('_') ? tool.name.split('_')[0] : 'default');
       }
+
+      this.entries.set(tool.name, { tool });
     }
   }
 
   /**
-   * Set pre-computed or newly generated embeddings for tools.
-   * Vectors are automatically normalized to unit L2 length and optionally quantized.
+   * Store pre-computed or generated vector embeddings (unit normalized).
    */
   public setEmbeddings(embeddings: Map<string, Float32Array> | Record<string, Float32Array | number[]>): void {
-    const entries = embeddings instanceof Map ? embeddings.entries() : Object.entries(embeddings);
+    const items = embeddings instanceof Map ? embeddings.entries() : Object.entries(embeddings);
 
-    for (const [name, rawVec] of entries) {
+    for (const [name, raw] of items) {
       const entry = this.entries.get(name);
       if (!entry) continue;
 
-      const vec = rawVec instanceof Float32Array ? rawVec : new Float32Array(rawVec);
+      const vec = raw instanceof Float32Array ? raw : new Float32Array(raw);
       if (this.dimension === 0 && vec.length > 0) {
         this.dimension = vec.length;
       }
 
-      // Compute L2 norm and normalize
+      // Unit normalize L2 length
       let sumSq = 0;
       for (let i = 0; i < vec.length; i++) {
         sumSq += vec[i] * vec[i];
@@ -74,16 +57,11 @@ export class ImpulseBank {
       }
 
       entry.embedding = normalized;
-      entry.norm = 1.0;
-
-      if (this.quantizeInt8) {
-        entry.quantized = Int8Quantizer.quantize(normalized);
-      }
     }
   }
 
   /**
-   * Add directed transition edges to the companion graph.
+   * Add directed transition edges to the companion tool workflow graph.
    */
   public addEdges(edges: ToolTransitionEdge[]): void {
     for (const edge of edges) {
@@ -101,27 +79,24 @@ export class ImpulseBank {
   }
 
   /**
-   * Online Bayesian update of edge weight based on multi-tool execution telemetry.
-   * Uses Dirichlet-Multinomial conjugate updating:
-   * W(i, j) = (alpha_0 * W_0 + N(i, j)) / (alpha_0 + sum_k N(i, k))
+   * Update workflow transition graph based on actual multi-step execution receipts.
    */
   public recordTransition(fromTool: string, toTool: string, priorWeight: number = 2.0): void {
-    let counts = this.observationCounts.get(fromTool);
+    let counts = this.transitionCounts.get(fromTool);
     if (!counts) {
       counts = new Map();
-      this.observationCounts.set(fromTool, counts);
+      this.transitionCounts.set(fromTool, counts);
     }
-    const current = counts.get(toTool) || 0;
-    counts.set(toTool, current + 1);
+    const count = (counts.get(toTool) || 0) + 1;
+    counts.set(toTool, count);
 
-    // Compute total observations from `fromTool`
-    let totalObs = 0;
+    let total = 0;
     for (const n of counts.values()) {
-      totalObs += n;
+      total += n;
     }
 
-    const currentEdgeWeight = this.getEdgeWeight(fromTool, toTool) || 0.1;
-    const updatedWeight = (priorWeight * currentEdgeWeight + (current + 1)) / (priorWeight + totalObs);
+    const currentEdge = this.getEdgeWeight(fromTool, toTool) || 0.1;
+    const updatedWeight = (priorWeight * currentEdge + count) / (priorWeight + total);
     this.setEdge(fromTool, toTool, updatedWeight);
   }
 
@@ -133,16 +108,12 @@ export class ImpulseBank {
     return this.graph.get(toolName) || new Map();
   }
 
-  public getTool(name: string): ImpulseTool | undefined {
+  public getTool(name: string): ToolDefinition | undefined {
     return this.entries.get(name)?.tool;
   }
 
-  public getAllTools(): ImpulseTool[] {
+  public getAllTools(): ToolDefinition[] {
     return Array.from(this.entries.values()).map((e) => e.tool);
-  }
-
-  public getAllEntries(): Map<string, BankToolEntry> {
-    return this.entries;
   }
 
   public getToolNames(): string[] {
@@ -153,38 +124,18 @@ export class ImpulseBank {
     return this.dimension;
   }
 
-  public isQuantized(): boolean {
-    return this.quantizeInt8;
-  }
-
   /**
-   * Computes cosine similarity between a normalized query vector and a tool vector.
-   * Uses Int8 integer math if bank is quantized; otherwise unrolled Float32 dot product.
+   * Compute cosine similarity between normalized query vector and tool vector.
    */
   public computeCosine(queryVec: Float32Array, toolName: string): number {
     const entry = this.entries.get(toolName);
-    if (!entry) return 0.0;
-
-    if (this.quantizeInt8 && entry.quantized) {
-      return Int8Quantizer.dotProductWithFloat(queryVec, entry.quantized);
-    }
-
-    if (!entry.embedding) return 0.0;
+    if (!entry || !entry.embedding) return 0.0;
 
     const vec = entry.embedding;
-    const len = vec.length;
     let dot = 0.0;
+    const len = Math.min(queryVec.length, vec.length);
 
-    // Loop with 4x unrolling for performance
-    let i = 0;
-    const limit = len - 3;
-    for (; i < limit; i += 4) {
-      dot += queryVec[i] * vec[i] +
-             queryVec[i + 1] * vec[i + 1] +
-             queryVec[i + 2] * vec[i + 2] +
-             queryVec[i + 3] * vec[i + 3];
-    }
-    for (; i < len; i++) {
+    for (let i = 0; i < len; i++) {
       dot += queryVec[i] * vec[i];
     }
 

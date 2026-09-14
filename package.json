@@ -1,19 +1,16 @@
 {
   "name": "tool-impulse",
-  "version": "1.1.0",
-  "description": "Tool Impulse Engine: Unconscious Perceptual Reflex for Autonomous Agent Tool Retrieval",
+  "version": "1.0.0",
+  "description": "In-memory dynamic tool router for LLM agents (Vercel AI SDK & LangChain)",
   "keywords": [
     "agents",
     "tools",
-    "mcp",
+    "tool-routing",
     "tool-retrieval",
-    "llm",
     "ai-sdk",
     "langchain",
-    "reflex",
-    "submodular",
-    "spreading-activation",
-    "quantization"
+    "bm25",
+    "llm"
   ],
   "author": "Avery Intelligence",
   "license": "MIT",
@@ -29,41 +26,26 @@
       "types": "./dist/adapters/ai-sdk.d.ts",
       "default": "./dist/adapters/ai-sdk.js"
     },
-    "./adapters/mcp": {
-      "types": "./dist/adapters/mcp.d.ts",
-      "default": "./dist/adapters/mcp.js"
-    },
     "./adapters/langchain": {
       "types": "./dist/adapters/langchain.d.ts",
       "default": "./dist/adapters/langchain.js"
     },
-    "./core/quantization": {
-      "types": "./dist/core/quantization.d.ts",
-      "default": "./dist/core/quantization.js"
-    },
-    "./core/topology": {
-      "types": "./dist/core/topology.d.ts",
-      "default": "./dist/core/topology.js"
-    },
-    "./core/speculative": {
-      "types": "./dist/core/speculative.d.ts",
-      "default": "./dist/core/speculative.js"
+    "./adapters/mcp": {
+      "types": "./dist/adapters/mcp.d.ts",
+      "default": "./dist/adapters/mcp.js"
     }
-  },
-  "bin": {
-    "tool-impulse-proxy": "./bin/tool-impulse-proxy.js"
   },
   "files": [
     "dist",
-    "bin",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "rm -rf dist && tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "benchmark": "tsx benchmarks/run-suite.ts",
+    "eval": "tsx evals/eval-suite.ts",
+    "benchmark": "tsx evals/eval-suite.ts",
     "prepack": "npm run build"
   },
   "devDependencies": {

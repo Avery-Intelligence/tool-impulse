@@ -1,35 +1,31 @@
 /**
- * Tool Impulse Engine - Core Types
- *
- * Lightweight, in-memory tool retrieval and context optimization for LLM agents.
+ * Core type definitions for Tool Impulse.
  */
 
-export type ToolVerbKind = 'read' | 'create' | 'update' | 'delete' | 'other';
-
-export interface ImpulseTool {
-  /** Unique tool name (e.g. "stripe_list_invoices", "jira_update_issue") */
+export interface ToolDefinition {
+  /** Unique tool identifier (e.g. "stripe_list_invoices", "jira_update_issue") */
   name: string;
-  /** Clear natural language description of what the tool does */
+  /** Natural language description explaining when and how to use the tool */
   description: string;
   /** Optional JSON Schema parameter specification */
   parameters?: Record<string, unknown>;
-  /** Functional grouping / domain (e.g. "stripe", "jira", "slack", "database") */
+  /** Domain / service grouping (e.g. "stripe", "jira", "slack"). Inferred from prefix if omitted. */
+  domain?: string;
+  /** Alias for domain */
   family?: string;
-  /** Optional domain keywords for additional lexical boost */
+  /** Optional keywords for exact lexical matching */
   keywords?: string[];
-  /** Flag indicating the tool is idempotent and safe to read */
+  /** Mark read-only or idempotent operations */
   readOnly?: boolean;
 }
 
-export interface ImpulseSessionState {
-  /** Embedding of the previous user turn to preserve context across pronoun shifts */
+export interface SessionState {
+  /** Embedding of the prior user turn for pronoun resolution (anaphora) */
   priorTurnEmbedding?: Float32Array | number[];
-  /** Names of tools recently executed in earlier turns for hysteresis inertia */
+  /** Tool names executed in recent turns (receives inertia bonus) */
   recentToolNames?: string[];
-  /** Current turn index in the multi-turn session */
+  /** Turn index in conversation */
   turnCount?: number;
-  /** Optional session identifier */
-  sessionId?: string;
 }
 
 export interface ToolTransitionEdge {
@@ -38,62 +34,68 @@ export interface ToolTransitionEdge {
   weight: number;
 }
 
-export interface CodeTopologyProvider {
-  /** Detect code symbols (e.g. function names, file paths) in a query */
-  extractSymbols(query: string): string[];
-  /** Map detected code symbols to tool names that should be boosted */
-  getRelatedTools(symbols: string[]): string[];
-}
-
-export interface ImpulseEmbedder {
+export interface EmbeddingProvider {
   /** Vector dimension (e.g. 1536 for OpenAI text-embedding-3-small) */
   readonly dimension: number;
-  /** Generate embedding for a single text string */
+  /** Generate embedding for a single text query */
   embedQuery(text: string): Promise<Float32Array>;
   /** Generate embeddings for a batch of strings */
   embedBatch(texts: string[]): Promise<Float32Array[]>;
 }
 
-export interface ImpulseOptions {
-  /** Maximum number of active tools to return (default: 3) */
+export interface RouterOptions {
+  /** Maximum number of active tools to return for this turn (default: 3) */
   topK?: number;
-  /** Maximum tools allowed from a single family to ensure diversity (default: 2) */
+  /** Maximum tools allowed from a single domain to prevent context starvation (default: 2) */
+  maxPerDomain?: number;
+  /** Alias for maxPerDomain */
   maxPerFamily?: number;
-  /** Weight for dense vector search vs sparse BM25: alpha * dense + (1 - alpha) * BM25 (default: 0.70) */
+  /** Weight for vector similarity vs BM25: alpha * dense + (1 - alpha) * BM25 (default: 0.70) */
   alpha?: number;
-  /** Blend factor for multi-turn trajectory: beta * current + (1 - beta) * prior (default: 0.75) */
+  /** Multi-turn trajectory blend factor: beta * current + (1 - beta) * prior (default: 0.75) */
   beta?: number;
-  /** Inertia score bonus for tools executed in recent turns (default: 0.25) */
+  /** Score boost for tools executed in recent turns (default: 0.20) */
   inertiaBonus?: number;
-  /** Graph diffusion boost for companion tools often used alongside the top match (default: 0.20) */
+  /** Score multiplier for companion tools connected in the workflow graph (default: 0.25) */
   companionBoost?: number;
-  /** Optional code topology hook for boosting developer tools */
-  codeTopology?: CodeTopologyProvider;
-  /** Minimum score threshold for candidate selection (default: 0.05) */
+  /** Minimum score required to mount a tool (default: 0.05) */
   minScoreThreshold?: number;
+  /** Fallback tools to return when the user query matches nothing (e.g. greetings) */
+  defaultTools?: string[];
+  /** Enable human-readable explanation trace for debugging */
+  debug?: boolean;
 }
 
-export interface ScoredTool {
-  tool: ImpulseTool;
-  score: number;
+export interface ScoredToolMatch {
+  tool: ToolDefinition;
+  totalScore: number;
   denseScore: number;
   bm25Score: number;
   companionBonus: number;
   inertiaBonus: number;
-  verbKind: ToolVerbKind;
+  domain: string;
+  reasons: string[];
 }
 
-export interface ImpulseResult {
-  /** The filtered active tools mounted for this turn (length <= topK) */
-  tools: ImpulseTool[];
-  /** Detailed score breakdown for all evaluated candidate tools */
-  scoredTools: ScoredTool[];
-  /** The top-1 anchor tool */
-  primaryTool?: ImpulseTool;
-  /** Companion tools mounted via graph co-occurrence */
-  companionTools: ImpulseTool[];
+export interface ToolRouteResult {
+  /** Active tools selected for the prompt (length <= topK) */
+  tools: ToolDefinition[];
+  /** Exact names of selected tools */
+  selectedNames: string[];
+  /** Primary top-1 matched tool */
+  primaryTool?: ToolDefinition;
   /** Contextualized query embedding for this turn (pass to next turn's session) */
   queryEmbedding?: Float32Array;
-  /** Total retrieval latency in milliseconds */
+  /** Detailed score breakdown per tool */
+  scores: Record<string, number>;
+  /** Human-readable explanation of why tools were selected (when debug: true) */
+  explanation?: string;
+  /** Retrieval latency in milliseconds */
   latencyMs: number;
 }
+
+// Backward compatible aliases
+export type ImpulseTool = ToolDefinition;
+export type ImpulseSessionState = SessionState;
+export type ImpulseOptions = RouterOptions;
+export type ImpulseResult = ToolRouteResult;

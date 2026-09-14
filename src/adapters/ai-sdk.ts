@@ -1,44 +1,62 @@
-import { ToolImpulseEngine } from '../core/engine.js';
-import { ImpulseOptions, ImpulseResult, ImpulseSessionState, ImpulseTool } from '../core/types.js';
+import { ToolImpulse } from '../core/engine.js';
+import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
 
-export interface AiSdkToolLike {
-  description?: string;
-  parameters?: Record<string, unknown>;
-  execute?: (...args: any[]) => Promise<any>;
-}
-
-export interface ImpulseAiSdkFilterOptions extends ImpulseOptions {
-  /** Extract user query from message history if query string is not provided directly */
-  extractLastUserQuery?: boolean;
+export interface AiSdkToolRecord {
+  [key: string]: {
+    description?: string;
+    parameters?: Record<string, unknown>;
+    execute?: (...args: any[]) => Promise<any>;
+    [key: string]: unknown;
+  };
 }
 
 /**
- * Creates an intelligent per-turn tool filter for Vercel AI SDK (generateText / streamText).
+ * Type-safe tool dictionary filter that preserves original tool types.
+ */
+export function filterTools<T extends Record<string, any>>(
+  tools: T,
+  selectedNames: string[]
+): Partial<T> {
+  const allowed = new Set(selectedNames);
+  const filtered: Partial<T> = {};
+
+  for (const [name, tool] of Object.entries(tools)) {
+    if (allowed.has(name)) {
+      filtered[name as keyof T] = tool;
+    }
+  }
+
+  return filtered;
+}
+
+/**
+ * Creates an in-memory tool router for Vercel AI SDK (`generateText` / `streamText`).
  *
  * @example
  * ```typescript
- * const impulse = createAiSdkImpulseMiddleware(engine);
- * const activeTools = await impulse.getTools("Check Stripe invoices for acme", allTools);
+ * const router = createToolRouter(engine, { topK: 3 });
+ * const { tools } = await router.getTools("Check Stripe invoices for Acme", allTools);
  *
- * const result = await generateText({
+ * const response = await generateText({
  *   model: openai('gpt-4o'),
- *   messages,
- *   tools: activeTools.tools,
+ *   prompt: "Check Stripe invoices for Acme",
+ *   tools,
  * });
  * ```
  */
-export function createAiSdkImpulseMiddleware<T extends Record<string, AiSdkToolLike>>(
-  engine: ToolImpulseEngine,
-  options?: ImpulseAiSdkFilterOptions
+export function createToolRouter<T extends AiSdkToolRecord>(
+  engine: ToolImpulse,
+  options?: RouterOptions
 ) {
   return {
     async getTools(
       queryOrMessages: string | Array<{ role: string; content: string }>,
       allTools: T,
-      session?: ImpulseSessionState
+      session?: SessionState
     ): Promise<{
       tools: Partial<T>;
-      impulseResult: ImpulseResult;
+      result: ToolRouteResult;
+      impulseResult: ToolRouteResult;
     }> {
       let query = '';
       if (typeof queryOrMessages === 'string') {
@@ -52,31 +70,28 @@ export function createAiSdkImpulseMiddleware<T extends Record<string, AiSdkToolL
         }
       }
 
-      // Check if allTools are registered in the engine; if bank is empty, register them
-      const bank = engine.getBank();
-      if (bank.getToolNames().length === 0) {
-        const impulseTools: ImpulseTool[] = Object.entries(allTools).map(([name, tool]) => ({
+      // Auto-register tools on first turn if catalog is empty
+      const catalog = engine.getCatalog();
+      if (catalog.getToolNames().length === 0) {
+        const toolDefs: ToolDefinition[] = Object.entries(allTools).map(([name, t]) => ({
           name,
-          description: tool.description || '',
-          parameters: tool.parameters,
+          description: t.description || '',
+          parameters: t.parameters,
         }));
-        engine.registerToolsSync(impulseTools);
+        engine.registerToolsSync(toolDefs);
       }
 
-      const impulseResult = await engine.resolve(query, session, options);
-      const selectedNames = new Set(impulseResult.tools.map((t) => t.name));
-
-      const filteredTools: Partial<T> = {};
-      for (const [name, tool] of Object.entries(allTools)) {
-        if (selectedNames.has(name)) {
-          filteredTools[name as keyof T] = tool as any;
-        }
-      }
+      const result = await engine.resolve(query, session, options);
+      const activeTools = filterTools(allTools, result.selectedNames);
 
       return {
-        tools: filteredTools,
-        impulseResult,
+        tools: activeTools,
+        result,
+        impulseResult: result,
       };
     },
   };
 }
+
+// Backward compatible alias
+export { createToolRouter as createAiSdkImpulseMiddleware };
