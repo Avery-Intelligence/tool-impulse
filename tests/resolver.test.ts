@@ -8,10 +8,10 @@ describe('ImpulseResolver', () => {
     const bank = new ImpulseBank();
     const resolver = new ImpulseResolver(bank);
 
-    expect(resolver.getToolArchetype({ name: 'stripe_list_invoices', description: 'List customer invoices' })).toBe('read');
-    expect(resolver.getToolArchetype({ name: 'github_create_pr', description: 'Open a new pull request' })).toBe('create');
-    expect(resolver.getToolArchetype({ name: 'jira_update_issue', description: 'Modify issue description' })).toBe('update');
-    expect(resolver.getToolArchetype({ name: 'slack_delete_message', description: 'Remove chat message' })).toBe('delete');
+    expect(resolver.getToolVerbKind({ name: 'stripe_list_invoices', description: 'List customer invoices' })).toBe('read');
+    expect(resolver.getToolVerbKind({ name: 'github_create_pr', description: 'Open a new pull request' })).toBe('create');
+    expect(resolver.getToolVerbKind({ name: 'jira_update_issue', description: 'Modify issue description' })).toBe('update');
+    expect(resolver.getToolVerbKind({ name: 'slack_delete_message', description: 'Remove chat message' })).toBe('delete');
 
     expect(resolver.detectQueryIntent('show me all recent payments')).toBe('read');
     expect(resolver.detectQueryIntent('create a new ticket in backlog')).toBe('create');

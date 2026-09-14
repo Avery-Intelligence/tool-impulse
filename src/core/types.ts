@@ -1,34 +1,34 @@
 /**
  * Tool Impulse Engine - Core Types
  *
- * Unconscious Perceptual Reflex for Autonomous Agent Tool Retrieval
+ * Lightweight, in-memory tool retrieval and context optimization for LLM agents.
  */
 
-export type ToolVerbArchetype = 'read' | 'create' | 'update' | 'delete' | 'unknown';
+export type ToolVerbKind = 'read' | 'create' | 'update' | 'delete' | 'other';
 
 export interface ImpulseTool {
   /** Unique tool name (e.g. "stripe_list_invoices", "jira_update_issue") */
   name: string;
-  /** Natural language description of tool affordance */
+  /** Clear natural language description of what the tool does */
   description: string;
   /** Optional JSON Schema parameter specification */
   parameters?: Record<string, unknown>;
-  /** Functional family grouping (e.g. "stripe", "jira", "slack", "code") */
+  /** Functional grouping / domain (e.g. "stripe", "jira", "slack", "database") */
   family?: string;
-  /** Domain fast-boost keywords */
+  /** Optional domain keywords for additional lexical boost */
   keywords?: string[];
-  /** Is this tool idempotent / read-only */
+  /** Flag indicating the tool is idempotent and safe to read */
   readOnly?: boolean;
 }
 
 export interface ImpulseSessionState {
-  /** Embedding of previous turn query for trajectory blending */
+  /** Embedding of the previous user turn to preserve context across pronoun shifts */
   priorTurnEmbedding?: Float32Array | number[];
-  /** Tool names recently executed in earlier turns (hysteresis bonus) */
+  /** Names of tools recently executed in earlier turns for hysteresis inertia */
   recentToolNames?: string[];
-  /** Turn index in the conversation */
+  /** Current turn index in the multi-turn session */
   turnCount?: number;
-  /** Session ID / context tracking */
+  /** Optional session identifier */
   sessionId?: string;
 }
 
@@ -39,37 +39,37 @@ export interface ToolTransitionEdge {
 }
 
 export interface CodeTopologyProvider {
-  /** Extract source code symbols from user query (functions, files, classes) */
+  /** Detect code symbols (e.g. function names, file paths) in a query */
   extractSymbols(query: string): string[];
-  /** Return tool names strongly associated with the given code symbols */
+  /** Map detected code symbols to tool names that should be boosted */
   getRelatedTools(symbols: string[]): string[];
 }
 
 export interface ImpulseEmbedder {
-  /** Vector dimension (e.g. 1536 for text-embedding-3-small) */
+  /** Vector dimension (e.g. 1536 for OpenAI text-embedding-3-small) */
   readonly dimension: number;
-  /** Compute embedding for single query string */
+  /** Generate embedding for a single text string */
   embedQuery(text: string): Promise<Float32Array>;
-  /** Compute embeddings for batch of texts (e.g. during tool registration) */
+  /** Generate embeddings for a batch of strings */
   embedBatch(texts: string[]): Promise<Float32Array[]>;
 }
 
 export interface ImpulseOptions {
-  /** Maximum number of dynamic impulse tools to mount (default: 3) */
+  /** Maximum number of active tools to return (default: 3) */
   topK?: number;
-  /** Maximum tools allowed from a single family to enforce submodular diversity (default: 2) */
+  /** Maximum tools allowed from a single family to ensure diversity (default: 2) */
   maxPerFamily?: number;
-  /** Dense vector vs sparse lexical weight: alpha * dense + (1 - alpha) * lexical (default: 0.70) */
+  /** Weight for dense vector search vs sparse BM25: alpha * dense + (1 - alpha) * BM25 (default: 0.70) */
   alpha?: number;
-  /** Trajectory context blend factor: beta * current + (1 - beta) * prior (default: 0.75) */
+  /** Blend factor for multi-turn trajectory: beta * current + (1 - beta) * prior (default: 0.75) */
   beta?: number;
-  /** Hysteresis inertia bonus for tools invoked in recent turns (default: 0.25) */
-  delta?: number;
-  /** Spreading activation diffusion coefficient along companion graph edges (default: 0.18) */
-  mu?: number;
-  /** Optional code topology hook for developer tool boosting */
+  /** Inertia score bonus for tools executed in recent turns (default: 0.25) */
+  inertiaBonus?: number;
+  /** Graph diffusion boost for companion tools often used alongside the top match (default: 0.20) */
+  companionBoost?: number;
+  /** Optional code topology hook for boosting developer tools */
   codeTopology?: CodeTopologyProvider;
-  /** Hard minimum score threshold for candidate selection (default: 0.10) */
+  /** Minimum score threshold for candidate selection (default: 0.05) */
   minScoreThreshold?: number;
 }
 
@@ -77,23 +77,23 @@ export interface ScoredTool {
   tool: ImpulseTool;
   score: number;
   denseScore: number;
-  sparseScore: number;
-  activationBonus: number;
-  hysteresisBonus: number;
-  archetype: ToolVerbArchetype;
+  bm25Score: number;
+  companionBonus: number;
+  inertiaBonus: number;
+  verbKind: ToolVerbKind;
 }
 
 export interface ImpulseResult {
-  /** Dynamic tools selected by the perceptual reflex (length <= topK) */
+  /** The filtered active tools mounted for this turn (length <= topK) */
   tools: ImpulseTool[];
-  /** All evaluated scores and metadata */
+  /** Detailed score breakdown for all evaluated candidate tools */
   scoredTools: ScoredTool[];
-  /** The primary Top-1 anchor tool */
+  /** The top-1 anchor tool */
   primaryTool?: ImpulseTool;
-  /** Companion tools mounted via spreading activation */
+  /** Companion tools mounted via graph co-occurrence */
   companionTools: ImpulseTool[];
-  /** Query embedding used for this turn (useful for chaining into next turn) */
+  /** Contextualized query embedding for this turn (pass to next turn's session) */
   queryEmbedding?: Float32Array;
-  /** Processing latency in milliseconds */
+  /** Total retrieval latency in milliseconds */
   latencyMs: number;
 }

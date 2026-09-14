@@ -49,7 +49,7 @@ export class SpeculativeRunner {
     }
 
     // Safety check: Idempotency
-    const isIdempotent = primaryTool.readOnly || scoredPrimary.archetype === 'read';
+    const isIdempotent = primaryTool.readOnly || scoredPrimary.verbKind === 'read';
     if (!isIdempotent) {
       return {
         tool: primaryTool,
