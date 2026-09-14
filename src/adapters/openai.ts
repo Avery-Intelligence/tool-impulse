@@ -1,0 +1,101 @@
+import { ToolImpulse } from '../core/engine.js';
+import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+
+export interface OpenAiFunctionTool {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+    strict?: boolean;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
+/**
+ * Convert an OpenAI function tool definition into a ToolDefinition.
+ */
+export function fromOpenAITool(tool: OpenAiFunctionTool): ToolDefinition {
+  return {
+    name: tool.function.name,
+    description: tool.function.description || '',
+    parameters: tool.function.parameters,
+  };
+}
+
+export function fromOpenAITools(tools: OpenAiFunctionTool[]): ToolDefinition[] {
+  return tools.map(fromOpenAITool);
+}
+
+/**
+ * Convert a ToolDefinition into an OpenAI function tool.
+ */
+export function toOpenAITool(tool: ToolDefinition): OpenAiFunctionTool {
+  return {
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+    },
+  };
+}
+
+export function toOpenAITools(tools: ToolDefinition[]): OpenAiFunctionTool[] {
+  return tools.map(toOpenAITool);
+}
+
+/**
+ * Creates an in-memory tool router for OpenAI, xAI Grok, Ollama, and OpenAI-compatible endpoints.
+ *
+ * @example
+ * ```typescript
+ * import OpenAI from 'openai';
+ * import { ToolImpulse, createOpenAIToolFilter } from 'tool-impulse';
+ *
+ * const openai = new OpenAI();
+ * const engine = new ToolImpulse();
+ * const filter = createOpenAIToolFilter(engine, { topK: 3 });
+ *
+ * const { tools } = await filter.filterTools("Find critical bug reports in Jira", allTools);
+ *
+ * const response = await openai.chat.completions.create({
+ *   model: 'gpt-4o',
+ *   messages: [{ role: 'user', content: "Find critical bug reports in Jira" }],
+ *   tools,
+ * });
+ * ```
+ */
+export function createOpenAIToolFilter(
+  engine: ToolImpulse,
+  options?: RouterOptions
+) {
+  return {
+    async filterTools(
+      query: string,
+      allTools: OpenAiFunctionTool[],
+      session?: SessionState
+    ): Promise<{
+      tools: OpenAiFunctionTool[];
+      result: ToolRouteResult;
+    }> {
+      if (engine.getCatalog().getToolNames().length === 0) {
+        engine.registerToolsSync(fromOpenAITools(allTools));
+      }
+
+      const result = await engine.resolve(query, session, options);
+      const allowed = new Set(result.selectedNames);
+      const filtered = allTools.filter((t) => allowed.has(t.function.name));
+
+      return {
+        tools: filtered,
+        result,
+      };
+    },
+  };
+}
+
+export const createOpenAiToolFilter = createOpenAIToolFilter;
+export const createGrokToolFilter = createOpenAIToolFilter;
+
