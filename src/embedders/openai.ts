@@ -1,4 +1,4 @@
-import { ImpulseEmbedder } from '../core/types.js';
+import { EmbeddingProvider } from '../core/types.js';
 
 export interface OpenAIEmbedderConfig {
   apiKey: string;
@@ -7,7 +7,7 @@ export interface OpenAIEmbedderConfig {
   baseUrl?: string;
 }
 
-export class OpenAIEmbedder implements ImpulseEmbedder {
+export class OpenAIEmbedder implements EmbeddingProvider {
   private apiKey: string;
   private model: string;
   public readonly dimension: number;
@@ -28,7 +28,6 @@ export class OpenAIEmbedder implements ImpulseEmbedder {
   public async embedBatch(texts: string[]): Promise<Float32Array[]> {
     if (texts.length === 0) return [];
 
-    // Batch in chunks of 50
     const chunkSize = 50;
     const allVectors: Float32Array[] = [];
 
@@ -64,9 +63,7 @@ export class OpenAIEmbedder implements ImpulseEmbedder {
       data: Array<{ embedding: number[]; index: number }>;
     };
 
-    // Sort by index to maintain ordering
     data.data.sort((a, b) => a.index - b.index);
-
     return data.data.map((item) => new Float32Array(item.embedding));
   }
 }

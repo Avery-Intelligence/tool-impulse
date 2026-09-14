@@ -1,42 +1,36 @@
-import { ImpulseBank } from './bank.js';
+import { ToolCatalog } from './bank.js';
 import { OkapiBM25 } from './bm25.js';
 import {
-  ImpulseOptions,
-  ImpulseResult,
-  ImpulseSessionState,
-  ImpulseTool,
-  ScoredTool,
-  ToolVerbKind,
+  RouterOptions,
+  ScoredToolMatch,
+  SessionState,
+  ToolDefinition,
+  ToolRouteResult,
 } from './types.js';
 
-const READ_VERBS = new Set(['get', 'list', 'search', 'find', 'read', 'fetch', 'show', 'view', 'check', 'status', 'inspect', 'query', 'download']);
-const CREATE_VERBS = new Set(['create', 'add', 'insert', 'new', 'post', 'generate', 'send', 'upload', 'clone', 'register', 'provision', 'start']);
-const UPDATE_VERBS = new Set(['update', 'edit', 'modify', 'patch', 'put', 'change', 'set', 'rename', 'archive', 'close', 'reopen', 'assign', 'resolve']);
-const DELETE_VERBS = new Set(['delete', 'remove', 'drop', 'destroy', 'cancel', 'erase', 'kill', 'purge', 'uninstall']);
-
-export class ImpulseResolver {
-  private bank: ImpulseBank;
+export class ToolResolver {
+  private catalog: ToolCatalog;
   private bm25: OkapiBM25;
-  private defaultOptions: Required<Omit<ImpulseOptions, 'codeTopology'>> = {
+  private defaultOptions: Required<Omit<RouterOptions, 'codeTopology' | 'defaultTools' | 'debug' | 'maxPerFamily'>> = {
     topK: 3,
-    maxPerFamily: 2,
+    maxPerDomain: 2,
     alpha: 0.70,
     beta: 0.75,
-    inertiaBonus: 0.25,
-    companionBoost: 0.20,
+    inertiaBonus: 0.20,
+    companionBoost: 0.25,
     minScoreThreshold: 0.05,
   };
 
-  constructor(bank: ImpulseBank) {
-    this.bank = bank;
+  constructor(catalog: ToolCatalog) {
+    this.catalog = catalog;
     this.bm25 = new OkapiBM25();
   }
 
   /**
-   * Re-index BM25 search corpus from bank tools.
+   * Synchronize the Okapi BM25 index with current catalog tools.
    */
-  public syncBm25Index(): void {
-    const tools = this.bank.getAllTools();
+  public syncIndex(): void {
+    const tools = this.catalog.getAllTools();
     const docs = tools.map((t) => ({
       id: t.name,
       text: `${t.name} ${t.description} ${(t.keywords || []).join(' ')}`,
@@ -45,46 +39,9 @@ export class ImpulseResolver {
   }
 
   /**
-   * Detect general verb kind for tool classification.
+   * Blend prior turn embedding with current query vector to resolve pronoun shifts.
    */
-  public getToolVerbKind(tool: ImpulseTool): ToolVerbKind {
-    const tokens = OkapiBM25.tokenize(tool.name);
-    for (const token of tokens) {
-      if (READ_VERBS.has(token)) return 'read';
-      if (CREATE_VERBS.has(token)) return 'create';
-      if (UPDATE_VERBS.has(token)) return 'update';
-      if (DELETE_VERBS.has(token)) return 'delete';
-    }
-
-    const descTokens = OkapiBM25.tokenize(tool.description).slice(0, 10);
-    for (const token of descTokens) {
-      if (READ_VERBS.has(token)) return 'read';
-      if (CREATE_VERBS.has(token)) return 'create';
-      if (UPDATE_VERBS.has(token)) return 'update';
-      if (DELETE_VERBS.has(token)) return 'delete';
-    }
-
-    return 'other';
-  }
-
-  /**
-   * Detect user query intent.
-   */
-  public detectQueryIntent(query: string): ToolVerbKind {
-    const tokens = OkapiBM25.tokenize(query);
-    for (const token of tokens) {
-      if (DELETE_VERBS.has(token)) return 'delete';
-      if (UPDATE_VERBS.has(token)) return 'update';
-      if (CREATE_VERBS.has(token)) return 'create';
-      if (READ_VERBS.has(token)) return 'read';
-    }
-    return 'read';
-  }
-
-  /**
-   * Blend previous turn embedding with current query vector to resolve pronoun shifts.
-   */
-  public contextualizeEmbedding(
+  public blendTrajectory(
     currentEmbedding: Float32Array,
     priorEmbedding?: Float32Array | number[],
     beta: number = 0.75
@@ -112,146 +69,147 @@ export class ImpulseResolver {
   }
 
   /**
-   * Resolve top-K tools for an incoming user query.
+   * Resolve and rank active tools for an incoming user query.
    */
   public resolve(
     query: string,
     queryEmbedding?: Float32Array,
-    session?: ImpulseSessionState,
-    options?: ImpulseOptions
-  ): ImpulseResult {
+    session?: SessionState,
+    options?: RouterOptions
+  ): ToolRouteResult {
     const startTime = performance.now();
     const opts = { ...this.defaultOptions, ...options };
-    const queryIntent = this.detectQueryIntent(query);
 
-    // 1. Contextualize query embedding if prior turn exists
+    // 1. Blend trajectory if multi-turn history exists
     let activeVec: Float32Array | undefined = queryEmbedding;
     if (queryEmbedding && session?.priorTurnEmbedding) {
-      activeVec = this.contextualizeEmbedding(queryEmbedding, session.priorTurnEmbedding, opts.beta);
+      activeVec = this.blendTrajectory(queryEmbedding, session.priorTurnEmbedding, opts.beta);
     }
 
     // 2. Score via Okapi BM25 lexical index
     const bm25Scores = this.bm25.score(query);
     const recentSet = new Set(session?.recentToolNames || []);
-    const scoredList: ScoredTool[] = [];
-    const allTools = this.bank.getAllTools();
+    const candidateList: ScoredToolMatch[] = [];
+    const allTools = this.catalog.getAllTools();
 
-    // 3. Compute hybrid scores
+    // 3. Compute base scores (dense + BM25 + inertia)
     for (const tool of allTools) {
-      const dense = activeVec ? this.bank.computeCosine(activeVec, tool.name) : 0.0;
+      const dense = activeVec ? this.catalog.computeCosine(activeVec, tool.name) : 0.0;
       const sparse = bm25Scores.get(tool.name) || 0.0;
-      const verbKind = this.getToolVerbKind(tool);
+      const domain = tool.domain || 'default';
+      const reasons: string[] = [];
 
-      // Weighted dense-sparse score
+      // Weight dense and sparse matches
       const baseScore = activeVec ? opts.alpha * dense + (1 - opts.alpha) * sparse : sparse;
+      if (dense > 0.1) reasons.push(`Dense match (${dense.toFixed(2)})`);
+      if (sparse > 0.1) reasons.push(`BM25 match (${sparse.toFixed(2)})`);
 
-      // Hysteresis inertia bonus for tools active in recent turns
+      // Inertia bonus for recently executed tools
       const inertia = recentSet.has(tool.name) ? opts.inertiaBonus : 0.0;
+      if (inertia > 0) reasons.push(`Inertia bonus (+${inertia.toFixed(2)})`);
 
-      scoredList.push({
+      candidateList.push({
         tool,
-        score: baseScore + inertia,
+        totalScore: baseScore + inertia,
         denseScore: dense,
         bm25Score: sparse,
         companionBonus: 0.0,
         inertiaBonus: inertia,
-        verbKind,
+        domain,
+        reasons,
       });
     }
 
-    // 4. Optional code topology boosting
-    if (options?.codeTopology) {
-      const symbols = options.codeTopology.extractSymbols(query);
-      if (symbols.length > 0) {
-        const relatedTools = new Set(options.codeTopology.getRelatedTools(symbols));
-        for (const item of scoredList) {
-          if (relatedTools.has(item.tool.name)) {
-            item.score += 0.30;
-          }
-        }
-      }
-    }
+    // Sort by preliminary score descending
+    candidateList.sort((a, b) => b.totalScore - a.totalScore);
 
-    // Preliminary sort descending
-    scoredList.sort((a, b) => b.score - a.score);
+    // 4. Companion Workflow Boosting
+    let primaryTool: ToolDefinition | undefined = undefined;
 
-    // 5. Companion Tool Graph Boosting
-    let primaryTool: ImpulseTool | undefined = undefined;
-    const companionTools: ImpulseTool[] = [];
-
-    if (scoredList.length > 0 && scoredList[0].score >= opts.minScoreThreshold) {
-      const anchor = scoredList[0];
+    if (candidateList.length > 0 && candidateList[0].totalScore >= opts.minScoreThreshold) {
+      const anchor = candidateList[0];
       primaryTool = anchor.tool;
-      const anchorScore = anchor.score;
+      const anchorScore = anchor.totalScore;
 
-      const neighbors = this.bank.getNeighbors(anchor.tool.name);
+      const neighbors = this.catalog.getNeighbors(anchor.tool.name);
       if (neighbors.size > 0) {
-        for (const candidate of scoredList) {
+        for (const candidate of candidateList) {
           if (candidate.tool.name === anchor.tool.name) continue;
 
           const edgeWeight = neighbors.get(candidate.tool.name);
           if (edgeWeight && edgeWeight > 0) {
             const bonus = opts.companionBoost * edgeWeight;
             candidate.companionBonus = bonus;
-            candidate.score += bonus;
+            candidate.totalScore += bonus;
+            candidate.reasons.push(`Companion boost from ${anchor.tool.name} (+${bonus.toFixed(2)})`);
 
-            // Cap companion score so it never overtakes the primary anchor
-            if (candidate.score >= anchorScore) {
-              candidate.score = anchorScore - 0.001;
+            // Anchor ceiling: companion tool never outranks direct primary anchor
+            if (candidate.totalScore >= anchorScore) {
+              candidate.totalScore = anchorScore - 0.001;
             }
-            companionTools.push(candidate.tool);
           }
         }
-        scoredList.sort((a, b) => b.score - a.score);
+        candidateList.sort((a, b) => b.totalScore - a.totalScore);
       }
     }
 
-    // 6. Family Diversity Filter (Prevent one provider from dominating context)
-    const selected: ImpulseTool[] = [];
-    const familyCounts = new Map<string, number>();
+    // 5. Domain Capping & Selection
+    const selected: ToolDefinition[] = [];
+    const domainCounts = new Map<string, number>();
 
-    // Pass 1: Select top tools respecting family caps and query safety
-    for (const candidate of scoredList) {
+    for (const candidate of candidateList) {
       if (selected.length >= opts.topK) break;
-      if (candidate.score < opts.minScoreThreshold) continue;
+      if (candidate.totalScore < opts.minScoreThreshold) continue;
 
-      const family = candidate.tool.family || 'default';
-      const count = familyCounts.get(family) || 0;
-
-      if (count >= opts.maxPerFamily) {
-        continue;
-      }
-
-      // Safety check: if user asked a read query, deprioritize destructive deletes
-      if (queryIntent === 'read' && candidate.verbKind === 'delete' && candidate.score < 0.85) {
+      const count = domainCounts.get(candidate.domain) || 0;
+      const maxAllowed = opts.maxPerDomain ?? opts.maxPerFamily ?? 2;
+      if (count >= maxAllowed) {
         continue;
       }
 
       selected.push(candidate.tool);
-      familyCounts.set(family, count + 1);
+      domainCounts.set(candidate.domain, count + 1);
     }
 
-    // Pass 2: Backfill if diversity constraints left slots open
-    if (selected.length < opts.topK) {
-      const selectedNames = new Set(selected.map((t) => t.name));
-      for (const candidate of scoredList) {
-        if (selected.length >= opts.topK) break;
-        if (candidate.score < opts.minScoreThreshold) continue;
-        if (selectedNames.has(candidate.tool.name)) continue;
-
-        selected.push(candidate.tool);
-        selectedNames.add(candidate.tool.name);
+    // 6. Cold Start / Zero Match Handling
+    if (selected.length === 0 && options?.defaultTools && options.defaultTools.length > 0) {
+      for (const name of options.defaultTools) {
+        const fallback = this.catalog.getTool(name);
+        if (fallback) selected.push(fallback);
       }
     }
 
     const latencyMs = performance.now() - startTime;
+    const scores: Record<string, number> = {};
+    for (const c of candidateList) {
+      scores[c.tool.name] = Number(c.totalScore.toFixed(3));
+    }
+
+    // 7. Optional Human-Readable Debug Trace
+    let explanation: string | undefined = undefined;
+    if (options?.debug) {
+      const lines = [`[ToolImpulse Debug] Query: "${query}" (resolved in ${latencyMs.toFixed(3)}ms)`];
+      if (selected.length === 0) {
+        lines.push('  No tools matched threshold. Cold start fallback applied.');
+      } else {
+        selected.forEach((tool, idx) => {
+          const match = candidateList.find((c) => c.tool.name === tool.name);
+          lines.push(`  ${idx + 1}. ${tool.name} (Score: ${match?.totalScore.toFixed(3)})`);
+          if (match?.reasons.length) {
+            match.reasons.forEach((r) => lines.push(`     - ${r}`));
+          }
+        });
+      }
+      explanation = lines.join('\n');
+    }
 
     return {
       tools: selected,
-      scoredTools: scoredList,
+      selectedNames: selected.map((t) => t.name),
       primaryTool,
-      companionTools,
       queryEmbedding: activeVec,
+      scores,
+      explanation,
       latencyMs,
     };
   }
