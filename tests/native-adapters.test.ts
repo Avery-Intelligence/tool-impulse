@@ -1,0 +1,161 @@
+import { describe, it, expect } from 'vitest';
+import { ToolImpulse } from '../src/core/engine.js';
+import {
+  createGeminiToolFilter,
+  GeminiFunctionDeclaration,
+  GeminiToolGroup,
+} from '../src/adapters/gemini.js';
+import {
+  createGrokToolFilter,
+  createOpenAiToolFilter,
+  OpenAiFunctionTool,
+} from '../src/adapters/grok.js';
+import {
+  createCloudflareAiFilter,
+  CloudflareAiTool,
+} from '../src/adapters/cloudflare.js';
+
+describe('Native Ecosystem Adapters', () => {
+  describe('Google Gemini Adapter', () => {
+    const geminiDeclarations: GeminiFunctionDeclaration[] = [
+      {
+        name: 'stripe_create_charge',
+        description: 'Charge a credit card in Stripe for orders',
+        parameters: { type: 'OBJECT', properties: { amount: { type: 'NUMBER' } } },
+      },
+      {
+        name: 'stripe_list_invoices',
+        description: 'Fetch billing invoices from Stripe',
+        parameters: { type: 'OBJECT', properties: { customerId: { type: 'STRING' } } },
+      },
+      {
+        name: 'jira_create_issue',
+        description: 'Create a new bug report or ticket in Jira',
+        parameters: { type: 'OBJECT', properties: { summary: { type: 'STRING' } } },
+      },
+      {
+        name: 'slack_send_dm',
+        description: 'Send direct message to teammate on Slack',
+        parameters: { type: 'OBJECT', properties: { userId: { type: 'STRING' } } },
+      },
+    ];
+
+    it('filters function declarations down to top-K', async () => {
+      const engine = new ToolImpulse();
+      const filter = createGeminiToolFilter(engine, { topK: 2 });
+
+      const { declarations, result } = await filter.filterDeclarations(
+        'Charge customer card for order 500',
+        geminiDeclarations
+      );
+
+      expect(declarations.length).toBeLessThanOrEqual(2);
+      expect(declarations[0].name).toBe('stripe_create_charge');
+      expect(result.selectedNames).toContain('stripe_create_charge');
+    });
+
+    it('formats tools in exact Google GenAI schema ({ tools: [{ functionDeclarations }] })', async () => {
+      const engine = new ToolImpulse();
+      const filter = createGeminiToolFilter(engine, { topK: 1 });
+
+      const { tools, result } = await filter.formatTools(
+        'Report urgent bug in Jira',
+        geminiDeclarations
+      );
+
+      expect(tools.length).toBe(1);
+      expect(tools[0].functionDeclarations).toBeDefined();
+      expect(tools[0].functionDeclarations?.length).toBe(1);
+      expect(tools[0].functionDeclarations![0].name).toBe('jira_create_issue');
+      expect(result.tools[0].name).toBe('jira_create_issue');
+    });
+
+    it('filters pre-grouped Gemini tool groups', async () => {
+      const engine = new ToolImpulse();
+      const filter = createGeminiToolFilter(engine, { topK: 1 });
+
+      const groups: GeminiToolGroup[] = [
+        { functionDeclarations: geminiDeclarations },
+      ];
+
+      const { tools } = await filter.filterTools('Send Slack message', groups);
+      expect(tools.length).toBe(1);
+      expect(tools[0].functionDeclarations?.length).toBe(1);
+      expect(tools[0].functionDeclarations![0].name).toBe('slack_send_dm');
+    });
+  });
+
+  describe('xAI Grok & OpenAI Adapter', () => {
+    const grokTools: OpenAiFunctionTool[] = [
+      {
+        type: 'function',
+        function: {
+          name: 'stripe_refund_payment',
+          description: 'Refund credit card charge in Stripe',
+          parameters: { type: 'object', properties: { chargeId: { type: 'string' } } },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'github_merge_pr',
+          description: 'Merge pull request on GitHub repository',
+          parameters: { type: 'object', properties: { prNumber: { type: 'number' } } },
+        },
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'slack_post_announcement',
+          description: 'Post release announcement to Slack general channel',
+          parameters: { type: 'object', properties: { message: { type: 'string' } } },
+        },
+      },
+    ];
+
+    it('filters OpenAI/Grok function tools for xai.chat.completions.create', async () => {
+      const engine = new ToolImpulse();
+      const filter = createGrokToolFilter(engine, { topK: 1 });
+
+      const { tools, result } = await filter.filterTools('Refund customer payment', grokTools);
+      expect(tools.length).toBe(1);
+      expect(tools[0].type).toBe('function');
+      expect(tools[0].function.name).toBe('stripe_refund_payment');
+      expect(result.selectedNames).toContain('stripe_refund_payment');
+    });
+
+    it('exports createOpenAiToolFilter alias identical to createGrokToolFilter', async () => {
+      const engine = new ToolImpulse();
+      const filter = createOpenAiToolFilter(engine, { topK: 1 });
+
+      const { tools } = await filter.filterTools('Merge PR #42', grokTools);
+      expect(tools.length).toBe(1);
+      expect(tools[0].function.name).toBe('github_merge_pr');
+    });
+  });
+
+  describe('Cloudflare Workers & Workers AI Adapter', () => {
+    const cfTools: CloudflareAiTool[] = [
+      {
+        name: 'db_query_users',
+        description: 'Query Postgres user accounts by email',
+        parameters: { type: 'object' },
+      },
+      {
+        name: 'cf_kv_get',
+        description: 'Fetch cached session from Cloudflare KV',
+        parameters: { type: 'object' },
+      },
+    ];
+
+    it('filters Cloudflare Workers AI tool specifications in-memory', async () => {
+      const engine = new ToolImpulse();
+      const filter = createCloudflareAiFilter(engine, { topK: 1 });
+
+      const { tools, result } = await filter.filterTools('Get cached user session from KV', cfTools);
+      expect(tools.length).toBe(1);
+      expect(tools[0].name).toBe('cf_kv_get');
+      expect(result.selectedNames).toContain('cf_kv_get');
+    });
+  });
+});
