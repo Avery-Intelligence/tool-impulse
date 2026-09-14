@@ -4,6 +4,7 @@ import {
   EmbeddingProvider,
   RouterOptions,
   SessionState,
+  ToolCatalogState,
   ToolDefinition,
   ToolRouteResult,
   ToolTransitionEdge,
@@ -14,6 +15,7 @@ export interface ToolImpulseConfig {
   defaultOptions?: RouterOptions;
   tools?: ToolDefinition[];
   edges?: ToolTransitionEdge[];
+  initialState?: ToolCatalogState;
 }
 
 export class ToolImpulse {
@@ -28,6 +30,9 @@ export class ToolImpulse {
     this.embedder = config.embedder;
     this.defaultOptions = config.defaultOptions;
 
+    if (config.initialState) {
+      this.importState(config.initialState);
+    }
     if (config.tools) {
       this.registerToolsSync(config.tools);
     }
@@ -134,6 +139,22 @@ export class ToolImpulse {
 
   public getResolver(): ToolResolver {
     return this.resolver;
+  }
+
+  /**
+   * Export in-memory catalog, vector embeddings, and workflow graph for serialization.
+   * Allows saving pre-computed tool states to disk/KV to eliminate startup embedding costs.
+   */
+  public exportState(): ToolCatalogState {
+    return this.catalog.exportState();
+  }
+
+  /**
+   * Hydrate catalog, vector embeddings, and workflow graph from serialized state.
+   */
+  public importState(state: ToolCatalogState): void {
+    this.catalog.importState(state);
+    this.resolver.syncIndex();
   }
 }
 

@@ -1,4 +1,4 @@
-import { ToolDefinition, ToolTransitionEdge } from './types.js';
+import { ToolCatalogState, ToolDefinition, ToolTransitionEdge } from './types.js';
 
 export interface ToolCatalogEntry {
   tool: ToolDefinition;
@@ -140,5 +140,50 @@ export class ToolCatalog {
     }
 
     return Math.max(0.0, Math.min(1.0, dot));
+  }
+
+  /**
+   * Export in-memory catalog, vector embeddings, and workflow graph state for serialization.
+   */
+  public exportState(): ToolCatalogState {
+    const tools = this.getAllTools();
+    const embeddings: Record<string, number[]> = {};
+
+    for (const [name, entry] of this.entries) {
+      if (entry.embedding) {
+        embeddings[name] = Array.from(entry.embedding);
+      }
+    }
+
+    const edges: ToolTransitionEdge[] = [];
+    for (const [from, toMap] of this.graph) {
+      for (const [to, weight] of toMap) {
+        edges.push({ fromTool: from, toTool: to, weight });
+      }
+    }
+
+    return {
+      version: 1,
+      tools,
+      embeddings: Object.keys(embeddings).length > 0 ? embeddings : undefined,
+      edges: edges.length > 0 ? edges : undefined,
+    };
+  }
+
+  /**
+   * Hydrate catalog, vector embeddings, and workflow graph from serialized state.
+   */
+  public importState(state: ToolCatalogState): void {
+    if (!state || !state.tools) return;
+
+    this.registerTools(state.tools);
+
+    if (state.embeddings) {
+      this.setEmbeddings(state.embeddings);
+    }
+
+    if (state.edges) {
+      this.addEdges(state.edges);
+    }
   }
 }

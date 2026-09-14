@@ -19,4 +19,21 @@ describe('OkapiBM25', () => {
     expect(scoresJira.get('doc2')).toBeGreaterThan(0.8);
     expect(scoresJira.get('doc1')).toBeLessThan(0.1);
   });
+
+  it('matches plurals and suffixes via morphological stemming', () => {
+    const bm25 = new OkapiBM25();
+
+    bm25.indexDocuments([
+      { id: 'tool_invoice', text: 'create customer invoice and process charge' },
+      { id: 'tool_meeting', text: 'schedule calendar meeting and event' },
+    ]);
+
+    // Query with plurals "invoices" and "charges"
+    const scoreInvoices = bm25.score('fetch unpaid customer invoices and charges');
+    expect(scoreInvoices.get('tool_invoice')).toBeGreaterThan(0.5);
+
+    // Query with plurals "meetings" and "events"
+    const scoreMeetings = bm25.score('list upcoming team meetings and events');
+    expect(scoreMeetings.get('tool_meeting')).toBeGreaterThan(0.5);
+  });
 });

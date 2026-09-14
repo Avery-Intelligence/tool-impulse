@@ -164,7 +164,65 @@ const response = await generateText({
 
 ---
 
-### 6. LangChain & LangGraph
+### 6. Anthropic Claude (`@anthropic-ai/sdk`)
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk';
+import { ToolImpulse, createAnthropicToolFilter } from 'tool-impulse';
+
+const anthropic = new Anthropic();
+const engine = new ToolImpulse();
+const claude = createAnthropicToolFilter(engine, { topK: 3 });
+
+const { tools } = await claude.filterTools("Check pending customer invoices", allClaudeTools);
+
+const response = await anthropic.messages.create({
+  model: 'claude-3-5-sonnet-20241022',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: "Check pending customer invoices" }],
+  tools,
+});
+```
+
+---
+
+### 7. Zero-Cost Serverless Cold Starts (`exportState` / `importState`)
+
+In serverless or edge environments (Cloud Run, Cloudflare Workers, Lambda), re-embedding on every cold start wastes money and adds startup latency. Pre-compute or cache your catalog state once:
+
+```typescript
+import { ToolImpulse } from 'tool-impulse';
+
+// 1. Pre-compute once (at build time, CI, or first startup)
+const engine = new ToolImpulse({ embedder: myEmbedder });
+await engine.registerTools(allTools);
+const serializedState = engine.exportState(); // JSON-serializable object
+
+// 2. Hydrate in <0.01ms on serverless container boot with $0 API spend
+const serverlessEngine = new ToolImpulse({ initialState: serializedState });
+const result = serverlessEngine.resolveSync("Charge invoice 123");
+```
+
+---
+
+### 8. Native Pluggable Embedders (Google, Cloudflare, OpenAI)
+
+```typescript
+import { ToolImpulse, GeminiEmbedder, CloudflareEmbedder, OpenAIEmbedder } from 'tool-impulse';
+
+// Google Gemini text-embedding-004
+const geminiEmbedder = new GeminiEmbedder({ apiKey: process.env.GEMINI_API_KEY! });
+
+// Cloudflare Workers AI (@cf/baai/bge-small-en-v1.5)
+const cfEmbedder = new CloudflareEmbedder({ ai: env.AI });
+
+// OpenAI text-embedding-3-small
+const openAiEmbedder = new OpenAIEmbedder({ apiKey: process.env.OPENAI_API_KEY! });
+```
+
+---
+
+### 9. LangChain & LangGraph
 
 ```typescript
 import { ToolImpulse, createLangChainRetriever } from 'tool-impulse';

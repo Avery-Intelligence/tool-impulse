@@ -34,6 +34,13 @@ export interface ToolTransitionEdge {
   weight: number;
 }
 
+export interface ToolCatalogState {
+  version: 1;
+  tools: ToolDefinition[];
+  embeddings?: Record<string, number[]>;
+  edges?: ToolTransitionEdge[];
+}
+
 export interface EmbeddingProvider {
   /** Vector dimension (e.g. 1536 for OpenAI text-embedding-3-small) */
   readonly dimension: number;

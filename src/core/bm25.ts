@@ -29,14 +29,37 @@ export class OkapiBM25 {
   }
 
   /**
-   * Fast lexical tokenizer: handles camelCase, snake_case, and non-alphanumerics.
+   * Lightweight morphological stemmer for English plurals and standard suffixes.
+   */
+  public static stem(word: string): string {
+    if (word.length <= 3) return word;
+    if (word.endsWith('sses')) return word.slice(0, -2);
+    if (word.endsWith('ies')) return word.slice(0, -3) + 'y';
+    if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
+    if (word.endsWith('ing') && word.length > 5) return word.slice(0, -3);
+    if (word.endsWith('ed') && word.length > 4) return word.slice(0, -2);
+    return word;
+  }
+
+  /**
+   * Fast lexical tokenizer: handles camelCase, snake_case, non-alphanumerics, and morphological stemming.
    */
   public static tokenize(text: string): string[] {
-    return text
+    const raw = text
       .replace(/([a-z])([A-Z])/g, '$1 $2')
       .toLowerCase()
       .split(/[^a-z0-9_]+/)
       .filter((t) => t.length > 1);
+
+    const tokens: string[] = [];
+    for (const t of raw) {
+      tokens.push(t);
+      const stemmed = OkapiBM25.stem(t);
+      if (stemmed !== t) {
+        tokens.push(stemmed);
+      }
+    }
+    return tokens;
   }
 
   /**

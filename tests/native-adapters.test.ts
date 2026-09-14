@@ -14,6 +14,12 @@ import {
   createCloudflareAiFilter,
   CloudflareAiTool,
 } from '../src/adapters/cloudflare.js';
+import {
+  createAnthropicToolFilter,
+  AnthropicTool,
+} from '../src/adapters/anthropic.js';
+import { GeminiEmbedder } from '../src/embedders/gemini.js';
+import { CloudflareEmbedder } from '../src/embedders/cloudflare.js';
 
 describe('Native Ecosystem Adapters', () => {
   describe('Google Gemini Adapter', () => {
@@ -156,6 +162,48 @@ describe('Native Ecosystem Adapters', () => {
       expect(tools.length).toBe(1);
       expect(tools[0].name).toBe('cf_kv_get');
       expect(result.selectedNames).toContain('cf_kv_get');
+    });
+  });
+
+  describe('Anthropic Claude Adapter', () => {
+    const anthropicTools: AnthropicTool[] = [
+      {
+        name: 'stripe_list_invoices',
+        description: 'Fetch billing invoices for a customer',
+        input_schema: { type: 'object', properties: { customerId: { type: 'string' } } },
+      },
+      {
+        name: 'jira_create_issue',
+        description: 'Create issue in Jira tracking system',
+        input_schema: { type: 'object', properties: { summary: { type: 'string' } } },
+      },
+    ];
+
+    it('filters Anthropic Claude tools with input_schema preserved', async () => {
+      const engine = new ToolImpulse();
+      const filter = createAnthropicToolFilter(engine, { topK: 1 });
+
+      const { tools, result } = await filter.filterTools('Find invoice for customer 10', anthropicTools);
+      expect(tools.length).toBe(1);
+      expect(tools[0].name).toBe('stripe_list_invoices');
+      expect(tools[0].input_schema).toBeDefined();
+      expect(result.selectedNames).toContain('stripe_list_invoices');
+    });
+  });
+
+  describe('Native Embedders', () => {
+    it('initializes GeminiEmbedder with text-embedding-004 defaults', () => {
+      const embedder = new GeminiEmbedder({ apiKey: 'mock-key' });
+      expect(embedder.dimension).toBe(768);
+    });
+
+    it('initializes CloudflareEmbedder with bge-small defaults and handles missing credentials', async () => {
+      const embedder = new CloudflareEmbedder();
+      expect(embedder.dimension).toBe(384);
+
+      await expect(embedder.embedBatch(['test'])).rejects.toThrow(
+        'CloudflareEmbedder requires either an `env.AI` binding or both `accountId` and `apiToken`'
+      );
     });
   });
 });
