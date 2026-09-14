@@ -1,9 +1,16 @@
 import { ImpulseTool, ToolTransitionEdge } from './types.js';
+import { Int8Quantizer, QuantizedVector } from './quantization.js';
 
 export interface BankToolEntry {
   tool: ImpulseTool;
   embedding?: Float32Array;
+  quantized?: QuantizedVector;
   norm: number;
+}
+
+export interface ImpulseBankConfig {
+  /** Enable Int8 scalar quantization to reduce vector memory by 75% */
+  quantizeInt8?: boolean;
 }
 
 export class ImpulseBank {
@@ -12,8 +19,11 @@ export class ImpulseBank {
   private graph: Map<string, Map<string, number>> = new Map();
   private observationCounts: Map<string, Map<string, number>> = new Map();
   private dimension: number = 0;
+  private quantizeInt8: boolean;
 
-  constructor() {}
+  constructor(config: ImpulseBankConfig = {}) {
+    this.quantizeInt8 = !!config.quantizeInt8;
+  }
 
   /**
    * Register tools into the in-memory bank.
@@ -38,7 +48,7 @@ export class ImpulseBank {
 
   /**
    * Set pre-computed or newly generated embeddings for tools.
-   * Vectors are automatically normalized to unit L2 length.
+   * Vectors are automatically normalized to unit L2 length and optionally quantized.
    */
   public setEmbeddings(embeddings: Map<string, Float32Array> | Record<string, Float32Array | number[]>): void {
     const entries = embeddings instanceof Map ? embeddings.entries() : Object.entries(embeddings);
@@ -65,6 +75,10 @@ export class ImpulseBank {
 
       entry.embedding = normalized;
       entry.norm = 1.0;
+
+      if (this.quantizeInt8) {
+        entry.quantized = Int8Quantizer.quantize(normalized);
+      }
     }
   }
 
@@ -139,13 +153,23 @@ export class ImpulseBank {
     return this.dimension;
   }
 
+  public isQuantized(): boolean {
+    return this.quantizeInt8;
+  }
+
   /**
    * Computes cosine similarity between a normalized query vector and a tool vector.
-   * Since both vectors are unit normalized, this is simply the dot product.
+   * Uses Int8 integer math if bank is quantized; otherwise unrolled Float32 dot product.
    */
   public computeCosine(queryVec: Float32Array, toolName: string): number {
     const entry = this.entries.get(toolName);
-    if (!entry || !entry.embedding) return 0.0;
+    if (!entry) return 0.0;
+
+    if (this.quantizeInt8 && entry.quantized) {
+      return Int8Quantizer.dotProductWithFloat(queryVec, entry.quantized);
+    }
+
+    if (!entry.embedding) return 0.0;
 
     const vec = entry.embedding;
     const len = vec.length;
