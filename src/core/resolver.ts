@@ -195,8 +195,20 @@ export class ToolResolver {
     // 6. Cold Start / Zero Match Handling
     if (selected.length === 0 && options?.defaultTools && options.defaultTools.length > 0) {
       for (const name of options.defaultTools) {
+        if (selected.length >= opts.topK) break;
+
         const fallback = this.catalog.getTool(name);
-        if (fallback) selected.push(fallback);
+        if (fallback) {
+          const domain = opts.domainResolver ? opts.domainResolver(fallback) : fallback.domain;
+          if (maxAllowedPerDomain !== undefined && domain) {
+            const count = domainCounts.get(domain) || 0;
+            if (count >= maxAllowedPerDomain) {
+              continue;
+            }
+            domainCounts.set(domain, count + 1);
+          }
+          selected.push(fallback);
+        }
       }
     }
 

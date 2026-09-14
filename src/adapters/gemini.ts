@@ -93,7 +93,11 @@ export function createGeminiToolFilter(
         incomingNames.some((name) => !catalog.hasTool(name));
 
       if (isStale) {
-        engine.setToolsSync(fromGeminiDeclarations(declarations));
+        if (engine.hasEmbedder()) {
+          await engine.setTools(fromGeminiDeclarations(declarations));
+        } else {
+          engine.setToolsSync(fromGeminiDeclarations(declarations));
+        }
       }
 
       const result = await engine.resolve(query, session, options);

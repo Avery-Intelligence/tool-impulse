@@ -69,7 +69,33 @@ export class ToolImpulse {
   }
 
   /**
-   * Atomically replace catalog tools and synchronize the Okapi BM25 lexical index.
+   * Check if an embedding provider is configured.
+   */
+  public hasEmbedder(): boolean {
+    return !!this.embedder;
+  }
+
+  /**
+   * Atomically replace catalog tools, compute embeddings (if an embedder is configured),
+   * and synchronize the Okapi BM25 lexical index.
+   */
+  public async setTools(tools: ToolDefinition[]): Promise<void> {
+    this.catalog.setTools(tools);
+    this.resolver.syncIndex();
+
+    if (this.embedder) {
+      const descriptions = tools.map((t) => `${t.name}: ${t.description || ''} ${(t.keywords || []).join(' ')}`);
+      const vectors = await this.embedder.embedBatch(descriptions);
+      const map = new Map<string, Float32Array>();
+      for (let i = 0; i < tools.length; i++) {
+        map.set(tools[i].name, vectors[i]);
+      }
+      this.catalog.setEmbeddings(map);
+    }
+  }
+
+  /**
+   * Atomically replace catalog tools synchronously without external embedding calls (runs pure BM25).
    */
   public setToolsSync(tools: ToolDefinition[]): void {
     this.catalog.setTools(tools);

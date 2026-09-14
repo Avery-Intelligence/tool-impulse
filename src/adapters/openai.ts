@@ -92,7 +92,11 @@ export function createOpenAIToolFilter(
         incomingNames.some((name) => !catalog.hasTool(name));
 
       if (isStale) {
-        engine.setToolsSync(fromOpenAITools(allTools));
+        if (engine.hasEmbedder()) {
+          await engine.setTools(fromOpenAITools(allTools));
+        } else {
+          engine.setToolsSync(fromOpenAITools(allTools));
+        }
       }
 
       const result = await engine.resolve(query, session, options);

@@ -17,15 +17,6 @@ export function createLangChainRetriever<T extends LangChainToolLike>(
   allTools: T[],
   options?: RouterOptions
 ) {
-  if (engine.getCatalog().getToolNames().length === 0) {
-    const toolDefs: ToolDefinition[] = allTools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      parameters: t.schema,
-    }));
-    engine.registerToolsSync(toolDefs);
-  }
-
   return {
     async getTools(
       query: string,
@@ -34,6 +25,27 @@ export function createLangChainRetriever<T extends LangChainToolLike>(
       tools: T[];
       result: ToolRouteResult;
     }> {
+      const catalog = engine.getCatalog();
+      const incomingNames = allTools.map((t) => t.name);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
+        const toolDefs: ToolDefinition[] = allTools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.schema,
+        }));
+        if (engine.hasEmbedder()) {
+          await engine.setTools(toolDefs);
+        } else {
+          engine.setToolsSync(toolDefs);
+        }
+      }
+
       const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = allTools.filter((t) => allowed.has(t.name));
@@ -49,6 +61,27 @@ export function createLangChainRetriever<T extends LangChainToolLike>(
       candidateTools: T[],
       session?: SessionState
     ): Promise<T[]> {
+      const catalog = engine.getCatalog();
+      const incomingNames = candidateTools.map((t) => t.name);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
+        const toolDefs: ToolDefinition[] = candidateTools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          parameters: t.schema,
+        }));
+        if (engine.hasEmbedder()) {
+          await engine.setTools(toolDefs);
+        } else {
+          engine.setToolsSync(toolDefs);
+        }
+      }
+
       const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       return candidateTools.filter((t) => allowed.has(t.name));

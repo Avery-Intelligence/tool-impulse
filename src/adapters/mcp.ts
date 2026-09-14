@@ -45,8 +45,20 @@ export function createMcpFilter(engine: ToolImpulse, options?: RouterOptions) {
       tools: McpToolDefinition[];
       result: ToolRouteResult;
     }> {
-      if (engine.getCatalog().getToolNames().length === 0) {
-        engine.registerToolsSync(fromMCPTools(allTools));
+      const catalog = engine.getCatalog();
+      const incomingNames = allTools.map((t) => t.name);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
+        if (engine.hasEmbedder()) {
+          await engine.setTools(fromMCPTools(allTools));
+        } else {
+          engine.setToolsSync(fromMCPTools(allTools));
+        }
       }
 
       const result = await engine.resolve(query, session, options);

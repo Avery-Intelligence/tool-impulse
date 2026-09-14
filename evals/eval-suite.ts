@@ -241,8 +241,28 @@ async function runEvaluations() {
   );
   console.log(`     Mounted cross-domain: [${r5.selectedNames.join(', ')}]\n`);
 
-  // 6. Benchmark: Latency across 100 iterations
-  console.log('6. Performance Benchmark (100 sequential resolutions):');
+  // 6. Cold Start Fallback & Omission Recovery
+  console.log('6. Cold Start Fallback & Invariant Bounds:');
+  const r6 = engine.resolveSync('Ambiguous greeting: Hello there!', undefined, undefined, {
+    topK: 2,
+    maxPerDomain: 1,
+    minScoreThreshold: 0.1,
+    defaultTools: ['slack_send_message', 'slack_read_channel', 'stripe_get_customer'],
+  });
+  assert(
+    'Cold start fallback activates on low score and caps at topK (<= 2 tools)',
+    r6.selectedNames.length === 2,
+    `Count: ${r6.selectedNames.length}`
+  );
+  assert(
+    'Cold start fallback respects maxPerDomain constraint (1 Slack, 1 Stripe)',
+    r6.selectedNames[0] === 'slack_send_message' && r6.selectedNames[1] === 'stripe_get_customer',
+    `Selected: ${r6.selectedNames.join(', ')}`
+  );
+  console.log(`     Mounted fallback tools: [${r6.selectedNames.join(', ')}]\n`);
+
+  // 7. Benchmark: Latency across 100 iterations
+  console.log('7. Performance Benchmark (100 sequential resolutions):');
   const iterations = 100;
   const latencies: number[] = [];
   for (let i = 0; i < iterations; i++) {

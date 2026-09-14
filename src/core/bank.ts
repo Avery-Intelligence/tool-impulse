@@ -56,6 +56,10 @@ export class ToolCatalog {
         entry.embedding = ToolCatalog.normalizeVector(tool.embedding);
         if (this.dimension === 0 && entry.embedding.length > 0) {
           this.dimension = entry.embedding.length;
+        } else if (this.dimension !== 0 && entry.embedding.length !== this.dimension) {
+          throw new Error(
+            `Embedding dimension mismatch: catalog dimension is ${this.dimension}, but tool "${tool.name}" provided embedding of length ${entry.embedding.length}.`
+          );
         }
       }
 
@@ -115,13 +119,17 @@ export class ToolCatalog {
     const items = embeddings instanceof Map ? embeddings.entries() : Object.entries(embeddings);
 
     for (const [name, raw] of items) {
-      const entry = this.entries.get(name);
-      if (!entry) continue;
-
       const vec = raw instanceof Float32Array ? raw : new Float32Array(raw);
       if (this.dimension === 0 && vec.length > 0) {
         this.dimension = vec.length;
+      } else if (this.dimension !== 0 && vec.length !== this.dimension) {
+        throw new Error(
+          `Embedding dimension mismatch: catalog dimension is ${this.dimension}, but tool "${name}" provided embedding of length ${vec.length}.`
+        );
       }
+
+      const entry = this.entries.get(name);
+      if (!entry) continue;
 
       // Unit normalize L2 length
       let sumSq = 0;
@@ -210,10 +218,14 @@ export class ToolCatalog {
     if (!entry || !entry.embedding) return 0.0;
 
     const vec = entry.embedding;
-    let dot = 0.0;
-    const len = Math.min(queryVec.length, vec.length);
+    if (queryVec.length !== vec.length) {
+      throw new Error(
+        `Embedding dimension mismatch for tool "${toolName}": query dimension is ${queryVec.length}, but tool embedding dimension is ${vec.length}. Embeddings must share the same dimension and model.`
+      );
+    }
 
-    for (let i = 0; i < len; i++) {
+    let dot = 0.0;
+    for (let i = 0; i < vec.length; i++) {
       dot += queryVec[i] * vec[i];
     }
 

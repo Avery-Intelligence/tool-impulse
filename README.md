@@ -1,6 +1,6 @@
 # tool-impulse
 
-Fast, zero-dependency in-memory tool router for LLM agents.
+In-process tool retrieval for TypeScript agents. Rank a supplied tool catalog using BM25, with optional vector similarity and conversation context. Your application remains responsible for authorization, execution, and recovery when retrieval omits a required tool.
 
 [![CI](https://github.com/Avery-Intelligence/tool-impulse/actions/workflows/ci.yml/badge.svg)](https://github.com/Avery-Intelligence/tool-impulse/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,19 +10,19 @@ Fast, zero-dependency in-memory tool router for LLM agents.
 
 ## Why?
 
-When an agent acquires 30+ tools across different services (Stripe, Jira, GitHub, Slack, databases), passing all tool definitions into every prompt creates three problems:
+When an agent acquires dozens of tools across different services (Stripe, Jira, GitHub, Slack, databases), passing all tool schemas into every prompt introduces three operational challenges:
 
-1. **Token Cost:** 50 tool schemas can take 15,000–30,000 tokens per turn.
-2. **Attention Degradation:** Models hallucinate arguments or pick wrong tools when flooded with dozens of schemas.
-3. **Latency:** High Time-to-First-Token (TTFT) when providers parse large schema arrays.
+1. **Token Budget & Prompt Limits:** 50+ tool schemas can take 15,000–30,000 tokens per turn, and providers enforce hard tool count limits (such as Anthropic's 128-tool limit).
+2. **Attention Degradation:** Models are more prone to hallucinating arguments or picking incorrect tools when flooded with dozens of competing schemas.
+3. **Time-to-First-Token (TTFT):** Large schema payloads increase schema parsing and prompt evaluation time.
 
-`tool-impulse` runs in your application runtime *before* calling the model. In **<0.1ms**, it selects the 3–5 tools relevant to the active turn using in-memory Okapi BM25 and vector similarity.
+`tool-impulse` runs in your application runtime *before* calling the model. It filters your tool catalog down to the 3–5 tools most relevant to the active turn:
 
-* **Zero dependencies:** Pure TypeScript standard library. Runs in Node.js, Bun, Cloudflare Workers, Next.js Edge, and browsers.
-* **Sub-millisecond:** In-memory dot products and lexical search in under 0.1ms.
-* **Handles pronouns:** Blends previous turn context so follow-ups (*"now refund them"*) keep the right tools mounted.
-* **Provider diversity:** Caps tools per service so one provider (e.g. 15 Stripe tools) doesn't crowd out Slack or Jira.
-* **Instant serverless boot:** Supports JSON state export/import so containers (Cloud Run, Lambda, Cloudflare) hydrate with $0 embedding cost.
+* **Zero external dependencies:** Pure TypeScript standard library. Runs in Node.js, Bun, Cloudflare Workers, Next.js Edge, and browser environments.
+* **Fast in-process ranking math:** Local BM25 ranking executes in **0.02ms–0.4ms** (10 to 500 tools). In-memory dense cosine scoring over 1536-dimensional vectors takes **0.03ms–1.0ms**.
+* **Handles conversational pronouns:** Blends previous turn context so follow-ups (*"now refund them"*) keep the right tools mounted.
+* **Provider diversity capping:** Caps tools per service so one large provider (e.g. 15 Stripe tools) does not crowd out secondary communication or ticketing tools.
+* **Instant serverless boot:** Supports JSON state export/import so serverless containers (Cloud Run, Lambda, Cloudflare) hydrate with $0 embedding overhead.
 
 ---
 
@@ -38,12 +38,12 @@ npm install tool-impulse
 
 ### 0. Simplest: Direct In-Memory Tool Filtering
 
-Works with any existing array of tools. Zero setup, zero configuration:
+Works with any existing array of tools with zero external dependencies:
 
 ```typescript
 import { ToolImpulse } from 'tool-impulse';
 
-// Filters any tool array down to the active subset in <0.1ms
+// Filters any tool array down to the active subset using in-process BM25 ranking
 const activeTools = ToolImpulse.filter("refund customer payment", allTools, { topK: 3 });
 ```
 
@@ -117,7 +117,7 @@ const claude = createAnthropicToolFilter(engine, { topK: 3 });
 const { tools } = await claude.filterTools("Check pending customer invoices", allClaudeTools);
 
 const response = await anthropic.messages.create({
-  model: 'claude-3-5-sonnet-20241022',
+  model: 'claude-3-7-sonnet-20250219',
   max_tokens: 1024,
   messages: [{ role: 'user', content: "Check pending customer invoices" }],
   tools, // Exact input_schema preserved
@@ -158,10 +158,11 @@ Modern frontier models (Anthropic Claude 3.5 Sonnet, OpenAI GPT-4o, Google Gemin
 | **Dynamic / Multi-Tenant Tools** | **Dynamic Tool Routing (`tool-impulse`)** | When tools change dynamically per user permissions or enterprise integrations (multi-MCP setups), prompt caching is invalidated on every request anyway. In-memory routing keeps the prompt lean. |
 | **Edge & Air-Gapped Deployments** | **Offline BM25 Mode (`tool-impulse`)** | Pure lexical routing executes 100% in-process in <0.1ms with 0 network calls, 0 token spend, and 0 external API dependencies. |
 
-### Latency Realities: BM25 vs. Dense Embeddings
-* **Pure BM25 Mode (Offline):** 0 network calls, 0 token cost, true **< 0.1ms local in-memory execution**. Best default for fast keyword and identifier filtering.
-* **Dense / Hybrid Mode (Remote APIs):** Calling an external embedding endpoint (e.g. OpenAI `text-embedding-3-small`) introduces a **150ms–300ms HTTP round trip**. Only use remote dense routing if your catalog cannot be disambiguated with lexical identifiers and synonyms.
-* **Local Dense Mode:** For fast sub-10ms semantic retrieval without network calls, pair `ToolImpulse` with an in-process local embedding model (such as `@xenova/transformers` running ONNX / Wasm locally).
+### Latency Realities: Local In-Memory Math vs. Remote Network I/O
+* **Pure BM25 Mode (Offline):** 0 network calls, 0 token cost, true **0.02ms–0.4ms in-process CPU execution** (10 to 500 tools). Best default for fast keyword and identifier filtering.
+* **In-Memory Dense Cosine:** 1536d vector dot product math runs locally in **0.03ms–1.0ms** (10 to 500 tools).
+* **Dense / Hybrid Mode with Remote APIs:** Calling a cloud embedding endpoint (e.g. OpenAI `text-embedding-3-small` or Gemini) introduces a **150ms–300ms HTTP round trip**. Only use remote dense routing if your catalog cannot be disambiguated with lexical identifiers and synonyms.
+* **Local Dense Mode (In-Process):** For sub-10ms semantic retrieval without network calls, pair `ToolImpulse` with an in-process local embedding model (such as `@xenova/transformers` running ONNX / Wasm locally).
 
 ---
 
@@ -192,6 +193,13 @@ const serverlessEngine = new ToolImpulse({ initialState: state });
 const result = serverlessEngine.resolveSync("Charge invoice 123");
 ```
 
+### 5. Handling Omission & Recovery Patterns
+Dynamic tool retrieval selects a relevant subset, but what if a user query requires a tool that was omitted from the top-K selection? Production architectures handle this gracefully via three complementary recovery patterns:
+
+1. **Two-Phase Tool Escalation (`request_more_tools`):** Expose a lightweight meta-tool (e.g. `search_tools({ query })`) alongside retrieved tools. If the model determines that the provided tools are insufficient to fulfill the user's intent, it invokes the fallback affordance to expand the active toolset on demand.
+2. **Confidence Thresholding & Cold-Start Defaults:** When an incoming query has low retrieval confidence (e.g. greetings or ambiguous intents), `minScoreThreshold` prevents mounting irrelevant tools, while `defaultTools` ensures baseline capabilities (e.g. `ask_clarification`, `general_help`) are always available.
+3. **Prompt Caching Boundary:** For small static catalogs (<25 tools), passing the full catalog directly with native model prompt caching avoids omission risks altogether with near-zero incremental token cost.
+
 ---
 
 ## Native Pluggable Embedders
@@ -201,7 +209,7 @@ Dense semantic matching can use any provider or run in pure offline BM25 mode:
 ```typescript
 import { ToolImpulse, GeminiEmbedder, CloudflareEmbedder, OpenAIEmbedder } from 'tool-impulse';
 
-// Google Gemini text-embedding-004
+// Google Gemini text-embedding-005
 const gemini = new GeminiEmbedder({ apiKey: process.env.GEMINI_API_KEY! });
 
 // Cloudflare Workers AI (@cf/baai/bge-small-en-v1.5)

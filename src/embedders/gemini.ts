@@ -8,7 +8,7 @@ export interface GeminiEmbedderConfig {
 }
 
 /**
- * Native Google Gemini embedding provider (using `text-embedding-004`).
+ * Native Google Gemini embedding provider (using `text-embedding-005`).
  * Zero external dependencies, pure native `fetch`.
  *
  * @example
@@ -31,7 +31,7 @@ export class GeminiEmbedder implements EmbeddingProvider {
 
   constructor(config: GeminiEmbedderConfig) {
     this.apiKey = config.apiKey;
-    this.model = config.model || 'text-embedding-004';
+    this.model = config.model || 'text-embedding-005';
     this.dimension = config.dimensions || 768;
     this.baseUrl = config.baseUrl || 'https://generativelanguage.googleapis.com/v1beta';
   }

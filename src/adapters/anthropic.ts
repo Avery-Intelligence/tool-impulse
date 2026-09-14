@@ -61,7 +61,7 @@ export function toAnthropicTools(tools: ToolDefinition[]): AnthropicTool[] {
  * const { tools } = await claudeFilter.filterTools("Check pending customer invoices", allTools);
  *
  * const response = await anthropic.messages.create({
- *   model: 'claude-3-5-sonnet-20241022',
+ *   model: 'claude-3-7-sonnet-20250219',
  *   max_tokens: 1024,
  *   messages: [{ role: 'user', content: "Check pending customer invoices" }],
  *   tools,
@@ -93,7 +93,11 @@ export function createAnthropicToolFilter(
         incomingNames.some((name) => !catalog.hasTool(name));
 
       if (isStale) {
-        engine.setToolsSync(fromAnthropicTools(allTools));
+        if (engine.hasEmbedder()) {
+          await engine.setTools(fromAnthropicTools(allTools));
+        } else {
+          engine.setToolsSync(fromAnthropicTools(allTools));
+        }
       }
 
       const result = await engine.resolve(query, session, options);

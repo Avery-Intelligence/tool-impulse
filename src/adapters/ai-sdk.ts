@@ -86,7 +86,11 @@ export function createToolRouter<T extends AiSdkToolRecord>(
           description: t.description || '',
           parameters: t.parameters,
         }));
-        engine.setToolsSync(toolDefs);
+        if (engine.hasEmbedder()) {
+          await engine.setTools(toolDefs);
+        } else {
+          engine.setToolsSync(toolDefs);
+        }
       }
 
       const result = await engine.resolve(query, session, options);

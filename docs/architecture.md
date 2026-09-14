@@ -22,18 +22,20 @@ Loading 50+ or 100+ complete JSON Schema tool definitions into the model's syste
 2. **Attention Degradation:** Models suffer from "needle-in-a-haystack" loss—they hallucinate non-existent parameter fields or pick the wrong tool because too many schemas compete for attention.
 3. **Latency:** Processing large prompt prefixes adds hundreds of milliseconds of Time-To-First-Token (TTFT).
 
-### 1.2 The Meta-Search Trap (`tool_search`)
-The common naive fix is giving the agent a `tool_search({ query })` tool. This fails because **an agent cannot formulate an intentional search query for an affordance it does not anticipate possessing.** 
+### 1.2 Tool Discovery Patterns: Explicit Meta-Search vs. Pre-Prompt Retrieval
+A common design pattern is providing the model with a meta-tool (e.g. `tool_search({ query })`) so it can look up schemas dynamically during execution. 
 
-Furthermore, meta-search forces a full extra LLM turn (User -> Model calls `tool_search` -> Tool returns schemas -> Model finally acts), doubling latency and user wait time.
+While meta-search is suitable when an agent has hierarchical sub-agents or is explicitly instructed to search for integrations, using it as the *sole* routing mechanism introduces two trade-offs:
+1. **Model Anticipation Bias:** An agent cannot always formulate an intentional search query for a specialized affordance it does not anticipate possessing.
+2. **Turn Latency:** Meta-search requires an additional LLM round-trip (User Prompt -> Model calls `tool_search` -> Application returns schemas -> Model generates final response), doubling the time-to-action.
 
 ---
 
 ## 2. The Solution: In-Memory Reflex Retrieval
 
-**Tool Impulse** acts as an in-memory retrieval layer running in Node.js *before* your code calls `generateText` or `streamText`. 
+**Tool Impulse** acts as an in-memory retrieval layer running in your application runtime *before* calling `generateText` or `streamText`. 
 
-In under **0.1ms**, it selects a compact, relevant subset of tools (e.g. 3 to 5 tools) matching the user's immediate intent.
+In 0.02ms–0.4ms (BM25) or 0.03ms–1.0ms (dense cosine over 10–500 tools), it selects a compact, relevant subset of tools matching the user's immediate intent:
 
 ```
  User Message ──► [Trajectory Blending] ◄── [Prior Turn Embedding]
@@ -115,7 +117,24 @@ Modern models (Claude 3.5 Sonnet, GPT-4o, Gemini 1.5/2.0) feature native **Promp
 
 ## 5. Latency Profile & Runtime Realities
 
-* **Pure BM25 Mode (Offline):** Runs 100% in-memory with zero network calls, zero token spend, and true **<0.1ms CPU execution**. Best default for fast lexical pruning.
-* **Dense / Hybrid Mode (Remote APIs):** If using remote embedding APIs (`text-embedding-3-small` or Gemini), factor in the **150ms–300ms HTTP round trip**. Only introduce remote embedding if lexical search cannot disambiguate conceptual synonyms.
+* **Pure BM25 Mode (Offline):** Runs 100% in-process with zero network calls, zero token spend, and **0.02ms–0.4ms CPU execution** across 10 to 500 tools. Best default for fast lexical pruning.
+* **In-Memory Dense Cosine:** Local 1536d vector dot products complete in **0.03ms–1.0ms** across 10 to 500 tools.
+* **Dense / Hybrid Mode (Remote APIs):** If using remote cloud embedding endpoints (`text-embedding-3-small` or Gemini), factor in the **150ms–300ms HTTP round trip**. Only introduce remote embedding if lexical search cannot disambiguate conceptual synonyms.
 * **Local Dense Mode (In-Process):** Pair `ToolImpulse` with an in-process embedding runtime (like `@xenova/transformers` running ONNX / Wasm locally) for sub-10ms semantic retrieval with zero external network hops.
+
+---
+
+## 6. Handling Omission & Recovery Strategies
+
+Any dynamic retrieval system trades completeness for context efficiency: mounting 3 tools instead of 100 reduces token cost and hallucination risk, but introduces the possibility of omitting a tool required for an edge case. Production systems should implement intentional recovery paths:
+
+### 6.1 Two-Phase Tool Escalation
+If the model responds indicating it cannot complete the user's request with the currently mounted tools (or calls an explicit `request_more_tools({ query })` fallback affordance), the application can expand `topK` or mount the full service domain catalog for that turn.
+
+### 6.2 Confidence Floors & Safe Defaults
+Setting `minScoreThreshold: 0.05` ensures irrelevant tools are not mounted on low-confidence queries (e.g. "Hello!"). Pair this with `defaultTools: ['ask_clarification', 'general_help']` so the agent always possesses safe communication affordances.
+
+### 6.3 Prompt Caching Decision Boundary
+When an agent's catalog is small (<25 tools) and static, sending all tools in the system prompt with provider prompt caching is the superior architectural choice. It avoids retrieval omissions entirely while maintaining sub-100ms TTFT and 90% prompt token discounts. Dynamic retrieval is best reserved for large catalogs (50–1,000+ tools), dynamic multi-tenant permissions, and strict context budgets.
+
 

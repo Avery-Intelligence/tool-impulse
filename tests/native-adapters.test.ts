@@ -217,7 +217,7 @@ describe('Native Ecosystem Adapters', () => {
   });
 
   describe('Native Embedders', () => {
-    it('initializes GeminiEmbedder with text-embedding-004 defaults', () => {
+    it('initializes GeminiEmbedder with text-embedding-005 defaults', () => {
       const embedder = new GeminiEmbedder({ apiKey: 'mock-key' });
       expect(embedder.dimension).toBe(768);
     });

@@ -48,4 +48,31 @@ describe('ToolCatalog', () => {
     expect(updatedWeight).toBeGreaterThan(0.2);
     expect(updatedWeight).toBeLessThanOrEqual(1.0);
   });
+
+  it('strictly throws on vector dimension mismatch in computeCosine', () => {
+    const catalog = new ToolCatalog();
+    catalog.registerTools([{ name: 'tool_a', description: 'Tool A' }]);
+    catalog.setEmbeddings({ tool_a: [1.0, 0.0, 0.0] }); // 3D
+
+    const wrongQuery = new Float32Array([1.0, 0.0]); // 2D
+    expect(() => catalog.computeCosine(wrongQuery, 'tool_a')).toThrowError(
+      /Embedding dimension mismatch for tool "tool_a": query dimension is 2, but tool embedding dimension is 3/
+    );
+  });
+
+  it('strictly throws on vector dimension mismatch when setting or registering embeddings', () => {
+    const catalog = new ToolCatalog();
+    catalog.registerTools([{ name: 'tool_a', description: 'Tool A', embedding: [1.0, 0.0, 0.0] }]); // 3D
+    expect(catalog.getDimension()).toBe(3);
+
+    // Mismatched dimension in setEmbeddings
+    expect(() => {
+      catalog.setEmbeddings({ tool_b: [1.0, 0.0] }); // 2D
+    }).toThrowError(/Embedding dimension mismatch: catalog dimension is 3, but tool "tool_b" provided embedding of length 2/);
+
+    // Mismatched dimension in registerTools
+    expect(() => {
+      catalog.registerTools([{ name: 'tool_c', description: 'Tool C', embedding: [1.0, 0.0] }]);
+    }).toThrowError(/Embedding dimension mismatch: catalog dimension is 3, but tool "tool_c" provided embedding of length 2/);
+  });
 });

@@ -79,4 +79,38 @@ describe('ToolResolver', () => {
     const norm = Math.sqrt(blended[0] * blended[0] + blended[1] * blended[1]);
     expect(norm).toBeCloseTo(1.0);
   });
+
+  it('enforces topK and maxPerDomain limits on cold start fallback defaultTools', () => {
+    const catalog = new ToolCatalog();
+    catalog.registerTools([
+      { name: 'stripe_charge', description: 'Process payment', domain: 'stripe' },
+      { name: 'stripe_refund', description: 'Refund payment', domain: 'stripe' },
+      { name: 'slack_msg', description: 'Send slack message', domain: 'slack' },
+      { name: 'jira_ticket', description: 'Create ticket', domain: 'jira' },
+    ]);
+
+    const resolver = new ToolResolver(catalog);
+    resolver.syncIndex();
+
+    // Query matches nothing (score 0), defaultTools has 4 tools, but topK is 2
+    const resTopK = resolver.resolve('unrelated gibberish query 12345', undefined, undefined, {
+      topK: 2,
+      minScoreThreshold: 0.1,
+      defaultTools: ['stripe_charge', 'stripe_refund', 'slack_msg', 'jira_ticket'],
+    });
+
+    expect(resTopK.tools.length).toBe(2);
+    expect(resTopK.selectedNames).toEqual(['stripe_charge', 'stripe_refund']);
+
+    // Query matches nothing, defaultTools has multiple stripe tools, but maxPerDomain is 1
+    const resDomain = resolver.resolve('unrelated gibberish query 12345', undefined, undefined, {
+      topK: 3,
+      maxPerDomain: 1,
+      minScoreThreshold: 0.1,
+      defaultTools: ['stripe_charge', 'stripe_refund', 'slack_msg'],
+    });
+
+    expect(resDomain.tools.length).toBe(2);
+    expect(resDomain.selectedNames).toEqual(['stripe_charge', 'slack_msg']);
+  });
 });

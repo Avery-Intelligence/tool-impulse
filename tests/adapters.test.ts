@@ -56,4 +56,38 @@ describe('Adapters', () => {
     expect(tools.length).toBe(1);
     expect(tools[0].name).toBe('stripe_refund');
   });
+
+  it('asynchronously populates tool embeddings when an embedder is configured', async () => {
+    let batchCalled = false;
+    const mockEmbedder = {
+      dimension: 2,
+      embedQuery: async (q: string) => {
+        return q.includes('billing') ? new Float32Array([1.0, 0.0]) : new Float32Array([0.0, 1.0]);
+      },
+      embedBatch: async (texts: string[]) => {
+        batchCalled = true;
+        return texts.map((t) => (t.includes('billing') ? new Float32Array([1.0, 0.0]) : new Float32Array([0.0, 1.0])));
+      },
+    };
+
+    const engine = new ToolImpulse({ embedder: mockEmbedder });
+    expect(engine.hasEmbedder()).toBe(true);
+
+    const allTools = {
+      stripe_billing: { description: 'Manage customer billing' },
+      slack_chat: { description: 'Chat with team members' },
+    };
+
+    const router = createToolRouter(engine, { topK: 1, alpha: 1.0 });
+    const { tools, result } = await router.getTools('customer billing', allTools);
+
+    expect(batchCalled).toBe(true);
+    expect(tools.stripe_billing).toBeDefined();
+    // Verify tool embedding was stored in catalog
+    const catalogEntry = (engine.getCatalog() as any).entries.get('stripe_billing');
+    expect(catalogEntry.embedding).toBeDefined();
+    expect(catalogEntry.embedding.length).toBe(2);
+    // Dense score was actively used in ranking
+    expect(result.scores['stripe_billing']).toBeCloseTo(1.0);
+  });
 });
