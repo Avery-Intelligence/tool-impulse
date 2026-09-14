@@ -1,0 +1,57 @@
+{
+  "name": "tool-impulse",
+  "version": "1.0.0",
+  "description": "Tool Impulse Engine: Unconscious Perceptual Reflex for Autonomous Agent Tool Retrieval",
+  "keywords": [
+    "agents",
+    "tools",
+    "mcp",
+    "tool-retrieval",
+    "llm",
+    "ai-sdk",
+    "reflex",
+    "submodular",
+    "spreading-activation"
+  ],
+  "author": "Avery Intelligence",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./adapters/ai-sdk": {
+      "types": "./dist/adapters/ai-sdk.d.ts",
+      "default": "./dist/adapters/ai-sdk.js"
+    },
+    "./adapters/mcp": {
+      "types": "./dist/adapters/mcp.d.ts",
+      "default": "./dist/adapters/mcp.js"
+    }
+  },
+  "bin": {
+    "tool-impulse-proxy": "./bin/tool-impulse-proxy.js"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "benchmark": "tsx benchmarks/run-suite.ts",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
