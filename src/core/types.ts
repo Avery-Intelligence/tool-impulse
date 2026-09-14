@@ -59,6 +59,10 @@ export interface RouterOptions {
   alpha?: number;
   /** Multi-turn trajectory blend factor: beta * current + (1 - beta) * prior (default: 0.75) */
   beta?: number;
+  /** Minimum cosine similarity between current and prior turn to blend trajectory. If below threshold, topic shift is detected and prior trajectory is discarded (default: 0.35) */
+  driftThreshold?: number;
+  /** Custom domain resolver function to group tools for maxPerDomain capping */
+  domainResolver?: (tool: ToolDefinition) => string | undefined;
   /** Score boost for tools executed in recent turns (default: 0.20) */
   inertiaBonus?: number;
   /** Score multiplier for companion tools connected in the workflow graph (default: 0.25) */

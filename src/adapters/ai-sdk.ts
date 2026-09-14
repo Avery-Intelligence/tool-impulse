@@ -45,9 +45,12 @@ export function filterTools<T extends Record<string, any>>(
  * ```
  */
 export function createToolRouter<T extends AiSdkToolRecord>(
-  engine: ToolImpulse,
-  options?: RouterOptions
+  engineOrOptions?: ToolImpulse | RouterOptions,
+  maybeOptions?: RouterOptions
 ) {
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+
   return {
     async getTools(
       queryOrMessages: string | Array<{ role: string; content: string }>,
@@ -69,14 +72,21 @@ export function createToolRouter<T extends AiSdkToolRecord>(
         }
       }
 
-      // Auto-register tools on first turn if catalog is empty
-      if (engine.getCatalog().getToolNames().length === 0) {
+      const catalog = engine.getCatalog();
+      const incomingNames = Object.keys(allTools);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
         const toolDefs: ToolDefinition[] = Object.entries(allTools).map(([name, t]) => ({
           name,
           description: t.description || '',
           parameters: t.parameters,
         }));
-        engine.registerToolsSync(toolDefs);
+        engine.setToolsSync(toolDefs);
       }
 
       const result = await engine.resolve(query, session, options);

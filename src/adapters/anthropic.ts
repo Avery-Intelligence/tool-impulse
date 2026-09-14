@@ -69,9 +69,12 @@ export function toAnthropicTools(tools: ToolDefinition[]): AnthropicTool[] {
  * ```
  */
 export function createAnthropicToolFilter(
-  engine: ToolImpulse,
-  options?: RouterOptions
+  engineOrOptions?: ToolImpulse | RouterOptions,
+  maybeOptions?: RouterOptions
 ) {
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+
   return {
     async filterTools(
       query: string,
@@ -81,9 +84,18 @@ export function createAnthropicToolFilter(
       tools: AnthropicTool[];
       result: ToolRouteResult;
     }> {
-      if (engine.getCatalog().getToolNames().length === 0) {
-        engine.registerToolsSync(fromAnthropicTools(allTools));
+      const catalog = engine.getCatalog();
+      const incomingNames = allTools.map((t) => t.name);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
+        engine.setToolsSync(fromAnthropicTools(allTools));
       }
+
       const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = allTools.filter((t) => allowed.has(t.name));

@@ -69,6 +69,14 @@ export class ToolImpulse {
   }
 
   /**
+   * Atomically replace catalog tools and synchronize the Okapi BM25 lexical index.
+   */
+  public setToolsSync(tools: ToolDefinition[]): void {
+    this.catalog.setTools(tools);
+    this.resolver.syncIndex();
+  }
+
+  /**
    * Set pre-computed vector embeddings for tools.
    */
   public setEmbeddings(embeddings: Map<string, Float32Array> | Record<string, Float32Array | number[]>): void {
@@ -117,18 +125,24 @@ export class ToolImpulse {
 
   /**
    * Filter an array of tools down to the relevant subset for the query.
-   * Preserves the exact input tool type T. Thread-safe.
+   * Preserves the exact input tool type T. Re-synchronizes catalog if tools change dynamically.
    */
-  public filterSync<T extends { name: string; description?: string }>(
+  public filterSync<T extends { name: string; description?: string; embedding?: Float32Array | number[] }>(
     query: string,
     tools: T[],
     options?: RouterOptions
   ): { tools: T[]; result: ToolRouteResult } {
-    if (this.catalog.getToolNames().length === 0) {
-      this.registerToolsSync(
+    const catalogNames = this.catalog.getToolNames();
+    const needsSync =
+      catalogNames.length !== tools.length ||
+      tools.some((t) => !this.catalog.hasTool(t.name));
+
+    if (needsSync) {
+      this.setToolsSync(
         tools.map((t) => ({
           name: t.name,
           description: t.description || '',
+          embedding: t.embedding,
         }))
       );
     }
@@ -142,19 +156,37 @@ export class ToolImpulse {
 
   /**
    * Async filtering with query embedding support.
+   * Re-synchronizes catalog if tools change dynamically.
    */
-  public async filter<T extends { name: string; description?: string }>(
+  public async filter<T extends { name: string; description?: string; embedding?: Float32Array | number[] }>(
     query: string,
     tools: T[],
     options?: RouterOptions
   ): Promise<{ tools: T[]; result: ToolRouteResult }> {
-    if (this.catalog.getToolNames().length === 0) {
-      await this.registerTools(
+    const catalogNames = this.catalog.getToolNames();
+    const needsSync =
+      catalogNames.length !== tools.length ||
+      tools.some((t) => !this.catalog.hasTool(t.name));
+
+    if (needsSync) {
+      this.catalog.setTools(
         tools.map((t) => ({
           name: t.name,
           description: t.description || '',
+          embedding: t.embedding,
         }))
       );
+      this.resolver.syncIndex();
+
+      if (this.embedder) {
+        const descriptions = tools.map((t) => `${t.name}: ${t.description || ''}`);
+        const vectors = await this.embedder.embedBatch(descriptions);
+        const map = new Map<string, Float32Array>();
+        for (let i = 0; i < tools.length; i++) {
+          map.set(tools[i].name, vectors[i]);
+        }
+        this.catalog.setEmbeddings(map);
+      }
     }
     const result = await this.resolve(query, undefined, options);
     const allowed = new Set(result.selectedNames);

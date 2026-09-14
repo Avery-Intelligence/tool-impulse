@@ -66,9 +66,12 @@ export function toGeminiDeclarations(tools: ToolDefinition[]): GeminiFunctionDec
  * ```
  */
 export function createGeminiToolFilter(
-  engine: ToolImpulse,
-  options?: RouterOptions
+  engineOrOptions?: ToolImpulse | RouterOptions,
+  maybeOptions?: RouterOptions
 ) {
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+
   return {
     /**
      * Filter a list of Gemini function declarations down to the active turn subset.
@@ -81,9 +84,18 @@ export function createGeminiToolFilter(
       declarations: GeminiFunctionDeclaration[];
       result: ToolRouteResult;
     }> {
-      if (engine.getCatalog().getToolNames().length === 0) {
-        engine.registerToolsSync(fromGeminiDeclarations(declarations));
+      const catalog = engine.getCatalog();
+      const incomingNames = declarations.map((d) => d.name);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
+        engine.setToolsSync(fromGeminiDeclarations(declarations));
       }
+
       const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = declarations.filter((d) => allowed.has(d.name));

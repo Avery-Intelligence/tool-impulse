@@ -50,14 +50,6 @@
       "types": "./dist/adapters/gemini.d.ts",
       "default": "./dist/adapters/gemini.js"
     },
-    "./adapters/grok": {
-      "types": "./dist/adapters/grok.d.ts",
-      "default": "./dist/adapters/grok.js"
-    },
-    "./adapters/cloudflare": {
-      "types": "./dist/adapters/cloudflare.d.ts",
-      "default": "./dist/adapters/cloudflare.js"
-    },
     "./adapters/anthropic": {
       "types": "./dist/adapters/anthropic.d.ts",
       "default": "./dist/adapters/anthropic.js"
@@ -87,6 +79,26 @@
     "eval": "tsx evals/eval-suite.ts",
     "benchmark": "tsx evals/benchmark.ts",
     "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "@ai-sdk/provider": ">=1.0.0",
+    "@anthropic-ai/sdk": ">=0.20.0",
+    "@google/genai": ">=0.1.0",
+    "openai": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/provider": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/genai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

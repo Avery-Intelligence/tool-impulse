@@ -64,12 +64,13 @@ describe('ToolResolver', () => {
     expect(r2.tools[0].name).toBe('tool_b');
   });
 
-  it('blends prior turn embedding for multi-turn trajectory context', () => {
+  it('blends prior turn embedding for multi-turn trajectory context when topics correlate', () => {
     const catalog = new ToolCatalog();
     const resolver = new ToolResolver(catalog);
 
-    const current = new Float32Array([1.0, 0.0]);
-    const prior = new Float32Array([0.0, 1.0]);
+    // Follow-up query sharing vector subspace (dot = 0.8*0.6 + 0.6*0.8 = 0.96 > 0.35)
+    const current = new Float32Array([0.8, 0.6]);
+    const prior = new Float32Array([0.6, 0.8]);
 
     const blended = resolver.blendTrajectory(current, prior, 0.75);
     expect(blended[0]).toBeGreaterThan(blended[1]);

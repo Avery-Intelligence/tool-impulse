@@ -11,10 +11,11 @@ import {
 export class ToolResolver {
   private catalog: ToolCatalog;
   private bm25: OkapiBM25;
-  private defaultOptions: Required<Omit<RouterOptions, 'defaultTools' | 'debug' | 'maxPerDomain'>> = {
+  private defaultOptions: Required<Omit<RouterOptions, 'defaultTools' | 'debug' | 'maxPerDomain' | 'domainResolver'>> = {
     topK: 3,
     alpha: 0.70,
     beta: 0.75,
+    driftThreshold: 0.35,
     inertiaBonus: 0.20,
     companionBoost: 0.25,
     minScoreThreshold: 0.05,
@@ -39,16 +40,32 @@ export class ToolResolver {
 
   /**
    * Blend prior turn embedding with current query vector to resolve pronoun shifts.
+   * Performs cosine similarity drift detection: if the cosine similarity between
+   * current and prior query vectors is below driftThreshold (default: 0.35), a topic
+   * shift / intent change is detected, and the prior trajectory is safely discarded.
    */
   public blendTrajectory(
     currentEmbedding: Float32Array,
     priorEmbedding?: Float32Array | number[],
-    beta: number = 0.75
+    beta: number = 0.75,
+    driftThreshold: number = 0.35
   ): Float32Array {
     if (!priorEmbedding) return currentEmbedding;
 
     const prior = priorEmbedding instanceof Float32Array ? priorEmbedding : new Float32Array(priorEmbedding);
     if (prior.length !== currentEmbedding.length) return currentEmbedding;
+
+    // Cosine similarity check (vectors are L2-normalized)
+    let cosSim = 0;
+    for (let i = 0; i < currentEmbedding.length; i++) {
+      cosSim += currentEmbedding[i] * prior[i];
+    }
+
+    // Intent Shift / Topic Switch: Queries are orthogonal or divergent.
+    // Discard prior trajectory to avoid cross-domain contamination.
+    if (cosSim < driftThreshold) {
+      return currentEmbedding;
+    }
 
     const blended = new Float32Array(currentEmbedding.length);
     let sumSq = 0;
@@ -82,7 +99,7 @@ export class ToolResolver {
     // 1. Blend trajectory if multi-turn history exists
     let activeVec: Float32Array | undefined = queryEmbedding;
     if (queryEmbedding && session?.priorTurnEmbedding) {
-      activeVec = this.blendTrajectory(queryEmbedding, session.priorTurnEmbedding, opts.beta);
+      activeVec = this.blendTrajectory(queryEmbedding, session.priorTurnEmbedding, opts.beta, opts.driftThreshold);
     }
 
     // 2. Score via Okapi BM25 lexical index
@@ -162,12 +179,14 @@ export class ToolResolver {
       if (selected.length >= opts.topK) break;
       if (candidate.totalScore < opts.minScoreThreshold) continue;
 
-      if (maxAllowedPerDomain !== undefined) {
-        const count = domainCounts.get(candidate.domain) || 0;
+      const domain = opts.domainResolver ? opts.domainResolver(candidate.tool) : candidate.domain;
+
+      if (maxAllowedPerDomain !== undefined && domain) {
+        const count = domainCounts.get(domain) || 0;
         if (count >= maxAllowedPerDomain) {
           continue;
         }
-        domainCounts.set(candidate.domain, count + 1);
+        domainCounts.set(domain, count + 1);
       }
 
       selected.push(candidate.tool);

@@ -8,14 +8,11 @@ import {
 import {
   createGrokToolFilter,
   createOpenAiToolFilter,
+  createOpenAIToolFilter,
   OpenAiFunctionTool,
   toOpenAITools,
   fromOpenAITools,
 } from '../src/adapters/openai.js';
-import {
-  createCloudflareAiFilter,
-  CloudflareAiTool,
-} from '../src/adapters/cloudflare.js';
 import {
   createAnthropicToolFilter,
   AnthropicTool,
@@ -154,28 +151,42 @@ describe('Native Ecosystem Adapters', () => {
     });
   });
 
-  describe('Cloudflare Workers & Workers AI Adapter', () => {
-    const cfTools: CloudflareAiTool[] = [
-      {
-        name: 'db_query_users',
-        description: 'Query Postgres user accounts by email',
-        parameters: { type: 'object' },
-      },
-      {
-        name: 'cf_kv_get',
-        description: 'Fetch cached session from Cloudflare KV',
-        parameters: { type: 'object' },
-      },
-    ];
+  describe('Dynamic Multi-Tenant Swapping & Edge Routing', () => {
+    it('correctly re-syncs catalog when tool definitions change between turns / tenants (no cache lock bug)', async () => {
+      const filter = createOpenAIToolFilter({ topK: 1 });
 
-    it('filters Cloudflare Workers AI tool specifications in-memory', async () => {
-      const engine = new ToolImpulse();
-      const filter = createCloudflareAiFilter(engine, { topK: 1 });
+      // Turn 1: Tenant A with billing tools
+      const tenantATools: OpenAiFunctionTool[] = [
+        {
+          type: 'function',
+          function: { name: 'stripe_charge', description: 'Process credit card payment' },
+        },
+      ];
+      const resA = await filter.filterTools('Charge card', tenantATools);
+      expect(resA.tools.length).toBe(1);
+      expect(resA.tools[0].function.name).toBe('stripe_charge');
 
-      const { tools, result } = await filter.filterTools('Get cached user session from KV', cfTools);
-      expect(tools.length).toBe(1);
-      expect(tools[0].name).toBe('cf_kv_get');
-      expect(result.selectedNames).toContain('cf_kv_get');
+      // Turn 2: Tenant B with completely different DevOps tools
+      const tenantBTools: OpenAiFunctionTool[] = [
+        {
+          type: 'function',
+          function: { name: 'k8s_restart_pod', description: 'Restart kubernetes pod container' },
+        },
+      ];
+      const resB = await filter.filterTools('Restart failing pod', tenantBTools);
+      expect(resB.tools.length).toBe(1);
+      expect(resB.tools[0].function.name).toBe('k8s_restart_pod');
+    });
+
+    it('filters tools in-memory for edge runtimes (Cloudflare Workers / V8 isolates)', () => {
+      const edgeTools = [
+        { name: 'db_query_users', description: 'Query Postgres user accounts by email' },
+        { name: 'cf_kv_get', description: 'Fetch cached session from Cloudflare KV' },
+      ];
+
+      const filtered = ToolImpulse.filter('Get cached user session from KV', edgeTools, { topK: 1 });
+      expect(filtered.length).toBe(1);
+      expect(filtered[0].name).toBe('cf_kv_get');
     });
   });
 

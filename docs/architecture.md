@@ -66,18 +66,20 @@ Tool Impulse combines both:
 score = alpha * cosine(queryVec, toolVec) + (1 - alpha) * bm25(query, tool)  // default alpha = 0.70
 ```
 
-### 3.2 Trajectory Contextualization (Handling Pronoun Shifts)
+### 3.2 Trajectory Contextualization & Intent-Shift Drift Cutoff
 In real multi-turn conversations, users frequently use pronouns:
 * **Turn 1:** *"Check pending invoices for Acme Corp in Stripe."*
 * **Turn 2:** *"Now bill them for the remaining $50."*
 
 In Turn 2, the query contains neither *"Stripe"* nor *"Acme"*. Naive semantic search will match generic billing tools or fail.
 
-Tool Impulse blends the embedding of the previous turn with the current turn:
+Tool Impulse calculates the cosine similarity between the current and prior turn vectors. If `cosine(current, prior) >= driftThreshold` (default: 0.35), it blends the embeddings:
 
 ```
 activeVector = normalize(beta * currentVector + (1 - beta) * priorVector)  // default beta = 0.75
 ```
+
+**Topic Boundary Detection:** If the user abruptly switches topics in Turn 2 (*"What's the weather in Tokyo?"*), `cosine(current, prior)` drops below `driftThreshold`. Tool Impulse detects the intent shift and discards the prior trajectory, preventing billing context from contaminating unrelated turns.
 
 Additionally, tools executed in the immediately preceding turns receive a configurable **inertia bonus** (delta = 0.20), keeping the active domain "warm."
 
@@ -94,12 +96,26 @@ Tool Impulse maintains an in-memory directed graph of tool transitions. When an 
 ### 3.4 Domain Diversity Filtering (Optional)
 On multi-intent prompts (e.g. *"Check customer invoice in Stripe and post confirmation in Slack"*), one service with many tools might crowd out secondary services.
 
-When configured (`maxPerDomain`), Tool Impulse prevents any single provider from claiming more than the specified limit, ensuring multi-intent prompts mount tools from all relevant services. If a query is strictly within one service, tools are never artificially crowded out by irrelevant third-party tools.
+When configured (`maxPerDomain`), Tool Impulse prevents any single provider from claiming more than the specified limit. The domain resolver inspects explicit `domain` tags, namespace prefixes (`stripe_`, `github:`, `jira.`), and camelCase prefixes (`stripeCreateCharge`). Unprefixed tools are never falsely clumped into a shared bucket.
 
 ---
 
-## 4. Runtime Characteristics & Zero Hosting Cost
+## 4. Prompt Caching vs. Dynamic Routing: Architectural Trade-Offs
 
-* **100% In-Memory:** Runs directly in your Node.js server, V8 isolate, or serverless container. No Redis, no external vector database, no network calls during retrieval.
-* **Sub-millisecond Latency:** Dot products and BM25 lookups over 100 tools complete in <0.1ms.
-* **Framework Agnostic:** First-class adapters for Vercel AI SDK, Google Gemini, Anthropic Claude, OpenAI, xAI Grok, Cloudflare Workers, LangChain, and Model Context Protocol (MCP).
+Modern models (Claude 3.5 Sonnet, GPT-4o, Gemini 1.5/2.0) feature native **Prompt Caching**, caching static tool definitions at a 75%–90% discount and sub-100ms TTFT.
+
+| Agent Profile | Recommended Approach | Architectural Rationale |
+| :--- | :--- | :--- |
+| **Small Static Toolsets (<25 tools)** | **Native Prompt Caching** | Send all tool schemas directly in the system prompt. Prompt caching renders token cost negligible and eliminates unnecessary router latency and network round-trips. |
+| **Large Catalogs (50 to 1,000+ tools)** | **Dynamic Tool Routing (`tool-impulse`)** | Models have hard tool limits (Anthropic limits tools to 128 per request). Passing 500 tool schemas blows 100,000 tokens per turn and causes massive attention degradation and parameter hallucinations. |
+| **Multi-Tenant / Dynamic Permissions** | **Dynamic Tool Routing (`tool-impulse`)** | When tools change dynamically per user permissions or enterprise integrations (e.g. multi-server MCP setups), prompt caching is invalidated on every turn. In-memory routing keeps the prompt lean. |
+| **Edge & Air-Gapped Runtimes** | **Offline BM25 Mode (`tool-impulse`)** | Pure lexical routing executes 100% in-process in <0.1ms with 0 network calls, 0 token spend, and 0 external API dependencies. |
+
+---
+
+## 5. Latency Profile & Runtime Realities
+
+* **Pure BM25 Mode (Offline):** Runs 100% in-memory with zero network calls, zero token spend, and true **<0.1ms CPU execution**. Best default for fast lexical pruning.
+* **Dense / Hybrid Mode (Remote APIs):** If using remote embedding APIs (`text-embedding-3-small` or Gemini), factor in the **150ms–300ms HTTP round trip**. Only introduce remote embedding if lexical search cannot disambiguate conceptual synonyms.
+* **Local Dense Mode (In-Process):** Pair `ToolImpulse` with an in-process embedding runtime (like `@xenova/transformers` running ONNX / Wasm locally) for sub-10ms semantic retrieval with zero external network hops.
+

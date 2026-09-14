@@ -65,4 +65,43 @@ describe('Domain Selection & Capping', () => {
     // Only stripe_refund_charge matches above threshold; it should NOT inject irrelevant Slack/Jira tools
     expect(result.selectedNames).toEqual(['stripe_refund_charge']);
   });
+
+  it('does not artificially throttle unprefixed or camelCase tools into a shared default domain', () => {
+    const catalog = new ToolCatalog();
+    catalog.registerTools([
+      { name: 'queryDatabase', description: 'Run raw SQL query on database' },
+      { name: 'calculateInvoiceTotal', description: 'Calculate total line items for an invoice' },
+      { name: 'fetchUserProfile', description: 'Fetch user profile from auth system' },
+    ]);
+    const resolver = new ToolResolver(catalog);
+    resolver.syncIndex();
+
+    // With maxPerDomain: 1, if they were falsely grouped into 'default', only 1 would be returned!
+    const result = resolver.resolve('query database and calculate invoice total for user profile', undefined, undefined, {
+      topK: 3,
+      maxPerDomain: 1,
+    });
+
+    expect(result.tools.length).toBe(3);
+    expect(result.selectedNames).toContain('queryDatabase');
+    expect(result.selectedNames).toContain('calculateInvoiceTotal');
+    expect(result.selectedNames).toContain('fetchUserProfile');
+  });
+
+  it('discards prior trajectory when cosine drift indicates topic boundary / intent shift', () => {
+    const catalog = new ToolCatalog();
+    const resolver = new ToolResolver(catalog);
+
+    // Vector A: points to billing concept (dimension 4, index 0)
+    const billingVec = new Float32Array([1, 0, 0, 0]);
+    // Vector B: points to weather concept (orthogonal, index 1)
+    const weatherVec = new Float32Array([0, 1, 0, 0]);
+
+    // Blending orthogonal vectors: cosSim = 0 < 0.35 driftThreshold
+    const blended = resolver.blendTrajectory(weatherVec, billingVec, 0.75, 0.35);
+
+    // Should return weatherVec directly without any billing contamination!
+    expect(blended[0]).toBe(0); // 0 billing signal
+    expect(blended[1]).toBe(1); // 100% weather signal
+  });
 });

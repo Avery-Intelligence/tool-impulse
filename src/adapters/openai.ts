@@ -68,9 +68,12 @@ export function toOpenAITools(tools: ToolDefinition[]): OpenAiFunctionTool[] {
  * ```
  */
 export function createOpenAIToolFilter(
-  engine: ToolImpulse,
-  options?: RouterOptions
+  engineOrOptions?: ToolImpulse | RouterOptions,
+  maybeOptions?: RouterOptions
 ) {
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+
   return {
     async filterTools(
       query: string,
@@ -80,8 +83,16 @@ export function createOpenAIToolFilter(
       tools: OpenAiFunctionTool[];
       result: ToolRouteResult;
     }> {
-      if (engine.getCatalog().getToolNames().length === 0) {
-        engine.registerToolsSync(fromOpenAITools(allTools));
+      const catalog = engine.getCatalog();
+      const incomingNames = allTools.map((t) => t.function.name);
+      const currentNames = catalog.getToolNames();
+
+      const isStale =
+        currentNames.length !== incomingNames.length ||
+        incomingNames.some((name) => !catalog.hasTool(name));
+
+      if (isStale) {
+        engine.setToolsSync(fromOpenAITools(allTools));
       }
 
       const result = await engine.resolve(query, session, options);

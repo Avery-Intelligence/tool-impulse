@@ -147,39 +147,35 @@ const response = await openai.chat.completions.create({
 
 ---
 
-### 5. Cloudflare Workers & Workers AI
+## When to Use Dynamic Routing vs. Prompt Caching
 
-Runs in Cloudflare V8 Isolates with **0ms cold start** and zero dependencies:
+Modern frontier models (Anthropic Claude 3.5 Sonnet, OpenAI GPT-4o, Google Gemini 1.5/2.0) feature native **Prompt Caching**, which caches static tool definitions at a 75%–90% discount and sub-100ms TTFT.
 
-```typescript
-import { ToolImpulse, createCloudflareAiFilter } from 'tool-impulse';
+| Architecture | Recommendation | Why? |
+| :--- | :--- | :--- |
+| **< 25 Static Tools** | **Native Prompt Caching** | Pass all tools directly in the system prompt. Prompt caching renders token cost negligible and avoids adding unnecessary router latency or an embedding API round trip. |
+| **50 to 1,000+ Tools** | **Dynamic Tool Routing (`tool-impulse`)** | Models have hard tool count limits (e.g. Anthropic's 128-tool limit). 500 tool schemas consume 100,000 tokens per turn and cause attention degradation and parameter hallucinations. |
+| **Dynamic / Multi-Tenant Tools** | **Dynamic Tool Routing (`tool-impulse`)** | When tools change dynamically per user permissions or enterprise integrations (multi-MCP setups), prompt caching is invalidated on every request anyway. In-memory routing keeps the prompt lean. |
+| **Edge & Air-Gapped Deployments** | **Offline BM25 Mode (`tool-impulse`)** | Pure lexical routing executes 100% in-process in <0.1ms with 0 network calls, 0 token spend, and 0 external API dependencies. |
 
-export default {
-  async fetch(request: Request, env: Env) {
-    const engine = new ToolImpulse();
-    const cf = createCloudflareAiFilter(engine, { topK: 3 });
-
-    const { prompt } = await request.json();
-    const { tools } = await cf.filterTools(prompt, allWorkerTools);
-
-    const response = await env.AI.run('@cf/meta/llama-3-8b-instruct', {
-      prompt,
-      tools,
-    });
-    return Response.json(response);
-  },
-};
-```
+### Latency Realities: BM25 vs. Dense Embeddings
+* **Pure BM25 Mode (Offline):** 0 network calls, 0 token cost, true **< 0.1ms local in-memory execution**. Best default for fast keyword and identifier filtering.
+* **Dense / Hybrid Mode (Remote APIs):** Calling an external embedding endpoint (e.g. OpenAI `text-embedding-3-small`) introduces a **150ms–300ms HTTP round trip**. Only use remote dense routing if your catalog cannot be disambiguated with lexical identifiers and synonyms.
+* **Local Dense Mode:** For fast sub-10ms semantic retrieval without network calls, pair `ToolImpulse` with an in-process local embedding model (such as `@xenova/transformers` running ONNX / Wasm locally).
 
 ---
 
 ## Key Features
 
-### 1. Multi-Turn Trajectory Blending (Pronouns)
-When users ask follow-up questions with pronouns (*"now charge them"*), naive search drops the relevant tools because the query lacks entity names. `tool-impulse` blends the previous query vector (beta = 0.75) with the active query vector so follow-ups maintain domain context.
+### 1. Multi-Turn Trajectory Blending with Intent-Shift Cutoff
+When users ask follow-up questions with pronouns (*"now charge them"*), naive search drops the relevant tools because the query lacks entity names. `tool-impulse` blends the previous query vector (beta = 0.75) with the active query vector to maintain domain context.
 
-### 2. Provider Diversity Capping
+**Topic Boundary Detection:** If the user abruptly switches topics (*"what's the weather in Tokyo?"*), cosine similarity drops below the drift threshold (default: 0.35) and prior context is discarded immediately, preventing cross-domain contamination.
+
+### 2. Namespace-Aware Provider Diversity Capping
 If an agent has 20 Stripe tools and 2 Slack tools, a billing query might monopolize all top-K slots with Stripe tools. Setting `maxPerDomain: 2` guarantees that related communication or tracking tools can enter the prompt.
+
+The domain resolver inspects explicit `domain` tags, namespace delimiters (`stripe_`, `github:`, `jira.`), and camelCase prefixes (`stripeCreateCharge`). Unprefixed tools are never falsely clumped into a shared bucket.
 
 ### 3. Companion Workflow Graph
 Define co-occurring tools (e.g. `jira_get_issue` -> `jira_update_issue`). When an anchor tool matches, its companions receive an activation boost so multi-step workflows succeed on Turn 1.

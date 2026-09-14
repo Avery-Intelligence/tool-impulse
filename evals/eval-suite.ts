@@ -193,8 +193,23 @@ async function runEvaluations() {
     t2.selectedNames.includes('stripe_refund_charge'),
     `Selected: ${t2.selectedNames.join(', ')}`
   );
+
+  // Turn 3: Topic switch to GitHub (cosine similarity < 0.35 drift threshold)
+  const turn3Vec = createSemanticVector(16, 5); // GitHub concept (orthogonal to billing)
+  const t3 = engine.resolveSync(
+    'review open pull requests in repository',
+    turn3Vec,
+    { priorTurnEmbedding: turn1Vec, recentToolNames: t2.selectedNames },
+    { topK: 2, driftThreshold: 0.35 }
+  );
+  assert(
+    'Turn 3 detects intent shift / topic boundary and drops stale billing context',
+    !t3.selectedNames.includes('stripe_refund_charge') && t3.selectedNames.includes('github_list_prs'),
+    `Selected: ${t3.selectedNames.join(', ')}`
+  );
   console.log(`     Turn 1 Context: [${t1.selectedNames.join(', ')}]`);
-  console.log(`     Turn 2 Context: [${t2.selectedNames.join(', ')}]\n`);
+  console.log(`     Turn 2 Context: [${t2.selectedNames.join(', ')}]`);
+  console.log(`     Turn 3 Shift Context: [${t3.selectedNames.join(', ')}]\n`);
 
   // 4. Companion Workflow Priming
   console.log('4. Companion Workflow Priming:');

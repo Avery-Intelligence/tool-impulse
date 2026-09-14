@@ -13,6 +13,29 @@ export class ToolCatalog {
   private dimension: number = 0;
 
   /**
+   * Infer domain namespace from tool definition or naming conventions.
+   * Supports standard delimiters (e.g. stripe_charge, github:pr, jira.issue, k8s-pod)
+   * and camelCase prefixes (stripeCreateCharge -> stripe).
+   * Returns undefined if no namespace prefix is identifiable, preventing false clumping.
+   */
+  public static inferDomain(tool: ToolDefinition): string | undefined {
+    if (tool.domain) return tool.domain;
+
+    const name = tool.name;
+    const match = name.match(/^([a-zA-Z0-9]+)[_:.-]/);
+    if (match) {
+      return match[1].toLowerCase();
+    }
+
+    const camelMatch = name.match(/^([a-z0-9]{3,})[A-Z]/);
+    if (camelMatch) {
+      return camelMatch[1].toLowerCase();
+    }
+
+    return undefined;
+  }
+
+  /**
    * Register tools into the in-memory catalog.
    * If a tool includes an embedding, it is normalized and stored.
    */
@@ -22,11 +45,13 @@ export class ToolCatalog {
         this.toolNames.push(tool.name);
       }
 
-      if (!tool.domain) {
-        tool.domain = tool.name.includes('_') ? tool.name.split('_')[0] : 'default';
-      }
+      const inferredDomain = ToolCatalog.inferDomain(tool);
+      const registeredTool: ToolDefinition = {
+        ...tool,
+        domain: inferredDomain,
+      };
 
-      const entry: ToolCatalogEntry = { tool };
+      const entry: ToolCatalogEntry = { tool: registeredTool };
       if (tool.embedding) {
         entry.embedding = ToolCatalog.normalizeVector(tool.embedding);
         if (this.dimension === 0 && entry.embedding.length > 0) {
@@ -36,6 +61,23 @@ export class ToolCatalog {
 
       this.entries.set(tool.name, entry);
     }
+  }
+
+  /**
+   * Replace catalog tools with a new toolset atomically.
+   */
+  public setTools(tools: ToolDefinition[]): void {
+    this.entries.clear();
+    this.toolNames = [];
+    this.dimension = 0;
+    this.registerTools(tools);
+  }
+
+  /**
+   * Check if a tool with the given name is registered in the catalog.
+   */
+  public hasTool(name: string): boolean {
+    return this.entries.has(name);
   }
 
   /**
