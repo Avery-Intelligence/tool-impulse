@@ -1,50 +1,54 @@
 import { ImpulseBank } from './bank.js';
+import { OkapiBM25 } from './bm25.js';
 import {
   ImpulseOptions,
   ImpulseResult,
   ImpulseSessionState,
   ImpulseTool,
   ScoredTool,
-  ToolVerbArchetype,
+  ToolVerbKind,
 } from './types.js';
 
-const READ_VERBS = new Set(['get', 'list', 'search', 'find', 'read', 'fetch', 'show', 'view', 'check', 'status', 'inspect', 'query', 'download', 'blast', 'deps', 'map', 'tour']);
-const CREATE_VERBS = new Set(['create', 'add', 'insert', 'new', 'post', 'generate', 'send', 'upload', 'clone', 'register', 'provision', 'start', 'begin', 'claim']);
-const UPDATE_VERBS = new Set(['update', 'edit', 'modify', 'patch', 'put', 'change', 'set', 'rename', 'archive', 'close', 'reopen', 'assign', 'resolve', 'transition']);
+const READ_VERBS = new Set(['get', 'list', 'search', 'find', 'read', 'fetch', 'show', 'view', 'check', 'status', 'inspect', 'query', 'download']);
+const CREATE_VERBS = new Set(['create', 'add', 'insert', 'new', 'post', 'generate', 'send', 'upload', 'clone', 'register', 'provision', 'start']);
+const UPDATE_VERBS = new Set(['update', 'edit', 'modify', 'patch', 'put', 'change', 'set', 'rename', 'archive', 'close', 'reopen', 'assign', 'resolve']);
 const DELETE_VERBS = new Set(['delete', 'remove', 'drop', 'destroy', 'cancel', 'erase', 'kill', 'purge', 'uninstall']);
 
 export class ImpulseResolver {
   private bank: ImpulseBank;
+  private bm25: OkapiBM25;
   private defaultOptions: Required<Omit<ImpulseOptions, 'codeTopology'>> = {
     topK: 3,
     maxPerFamily: 2,
     alpha: 0.70,
     beta: 0.75,
-    delta: 0.25,
-    mu: 0.18,
-    minScoreThreshold: 0.10,
+    inertiaBonus: 0.25,
+    companionBoost: 0.20,
+    minScoreThreshold: 0.05,
   };
 
   constructor(bank: ImpulseBank) {
     this.bank = bank;
+    this.bm25 = new OkapiBM25();
   }
 
   /**
-   * Fast lexical tokenization splitting camelCase, snake_case, and non-alphanumerics.
+   * Re-index BM25 search corpus from bank tools.
    */
-  public tokenize(text: string): string[] {
-    return text
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((t) => t.length > 1);
+  public syncBm25Index(): void {
+    const tools = this.bank.getAllTools();
+    const docs = tools.map((t) => ({
+      id: t.name,
+      text: `${t.name} ${t.description} ${(t.keywords || []).join(' ')}`,
+    }));
+    this.bm25.indexDocuments(docs);
   }
 
   /**
-   * Classify tool verb archetype based on tool name and description.
+   * Detect general verb kind for tool classification.
    */
-  public getToolArchetype(tool: ImpulseTool): ToolVerbArchetype {
-    const tokens = this.tokenize(tool.name);
+  public getToolVerbKind(tool: ImpulseTool): ToolVerbKind {
+    const tokens = OkapiBM25.tokenize(tool.name);
     for (const token of tokens) {
       if (READ_VERBS.has(token)) return 'read';
       if (CREATE_VERBS.has(token)) return 'create';
@@ -52,7 +56,7 @@ export class ImpulseResolver {
       if (DELETE_VERBS.has(token)) return 'delete';
     }
 
-    const descTokens = this.tokenize(tool.description).slice(0, 10);
+    const descTokens = OkapiBM25.tokenize(tool.description).slice(0, 10);
     for (const token of descTokens) {
       if (READ_VERBS.has(token)) return 'read';
       if (CREATE_VERBS.has(token)) return 'create';
@@ -60,58 +64,25 @@ export class ImpulseResolver {
       if (DELETE_VERBS.has(token)) return 'delete';
     }
 
-    return 'unknown';
+    return 'other';
   }
 
   /**
-   * Detect user query intent archetype.
+   * Detect user query intent.
    */
-  public detectQueryIntent(query: string): ToolVerbArchetype {
-    const tokens = this.tokenize(query);
+  public detectQueryIntent(query: string): ToolVerbKind {
+    const tokens = OkapiBM25.tokenize(query);
     for (const token of tokens) {
       if (DELETE_VERBS.has(token)) return 'delete';
       if (UPDATE_VERBS.has(token)) return 'update';
       if (CREATE_VERBS.has(token)) return 'create';
       if (READ_VERBS.has(token)) return 'read';
     }
-    return 'read'; // Default safe assumption is exploratory read
+    return 'read';
   }
 
   /**
-   * Fast lexical BM25-like sparse scoring over tool name, description, and keywords.
-   */
-  public computeSparseScore(queryTokens: string[], tool: ImpulseTool): number {
-    if (queryTokens.length === 0) return 0.0;
-
-    const nameTokens = new Set(this.tokenize(tool.name));
-    const descTokens = new Set(this.tokenize(tool.description));
-    const keywords = new Set((tool.keywords || []).map((k) => k.toLowerCase()));
-
-    let matches = 0;
-    let nameMatches = 0;
-    let keywordMatches = 0;
-
-    for (const q of queryTokens) {
-      if (nameTokens.has(q)) {
-        matches += 2.0;
-        nameMatches++;
-      } else if (keywords.has(q)) {
-        matches += 1.8;
-        keywordMatches++;
-      } else if (descTokens.has(q)) {
-        matches += 1.0;
-      }
-    }
-
-    // Normalized BM25 proxy bounded in [0, 1]
-    const rawScore = matches / (queryTokens.length + 1.5);
-    const boost = (nameMatches > 0 ? 0.25 : 0) + (keywordMatches > 0 ? 0.20 : 0);
-
-    return Math.min(1.0, rawScore + boost);
-  }
-
-  /**
-   * Contextualize query embedding with prior turn embedding (Trajectory Blending).
+   * Blend previous turn embedding with current query vector to resolve pronoun shifts.
    */
   public contextualizeEmbedding(
     currentEmbedding: Float32Array,
@@ -132,7 +103,6 @@ export class ImpulseResolver {
       sumSq += val * val;
     }
 
-    // Re-normalize to unit length
     const norm = Math.sqrt(sumSq) || 1e-10;
     for (let i = 0; i < blended.length; i++) {
       blended[i] /= norm;
@@ -142,8 +112,7 @@ export class ImpulseResolver {
   }
 
   /**
-   * Main Perceptual Reflex Resolver.
-   * Runs in <0.08ms in-memory across registered tools.
+   * Resolve top-K tools for an incoming user query.
    */
   public resolve(
     query: string,
@@ -153,7 +122,6 @@ export class ImpulseResolver {
   ): ImpulseResult {
     const startTime = performance.now();
     const opts = { ...this.defaultOptions, ...options };
-    const queryTokens = this.tokenize(query);
     const queryIntent = this.detectQueryIntent(query);
 
     // 1. Contextualize query embedding if prior turn exists
@@ -162,34 +130,36 @@ export class ImpulseResolver {
       activeVec = this.contextualizeEmbedding(queryEmbedding, session.priorTurnEmbedding, opts.beta);
     }
 
+    // 2. Score via Okapi BM25 lexical index
+    const bm25Scores = this.bm25.score(query);
     const recentSet = new Set(session?.recentToolNames || []);
     const scoredList: ScoredTool[] = [];
     const allTools = this.bank.getAllTools();
 
-    // 2. Score all candidate tools
+    // 3. Compute hybrid scores
     for (const tool of allTools) {
       const dense = activeVec ? this.bank.computeCosine(activeVec, tool.name) : 0.0;
-      const sparse = this.computeSparseScore(queryTokens, tool);
-      const archetype = this.getToolArchetype(tool);
+      const sparse = bm25Scores.get(tool.name) || 0.0;
+      const verbKind = this.getToolVerbKind(tool);
 
-      // Hybrid combination
+      // Weighted dense-sparse score
       const baseScore = activeVec ? opts.alpha * dense + (1 - opts.alpha) * sparse : sparse;
 
       // Hysteresis inertia bonus for tools active in recent turns
-      const hysteresisBonus = recentSet.has(tool.name) ? opts.delta : 0.0;
+      const inertia = recentSet.has(tool.name) ? opts.inertiaBonus : 0.0;
 
       scoredList.push({
         tool,
-        score: baseScore + hysteresisBonus,
+        score: baseScore + inertia,
         denseScore: dense,
-        sparseScore: sparse,
-        activationBonus: 0.0,
-        hysteresisBonus,
-        archetype,
+        bm25Score: sparse,
+        companionBonus: 0.0,
+        inertiaBonus: inertia,
+        verbKind,
       });
     }
 
-    // 3. Apply Code Topology Boost if provider supplied
+    // 4. Optional code topology boosting
     if (options?.codeTopology) {
       const symbols = options.codeTopology.extractSymbols(query);
       if (symbols.length > 0) {
@@ -202,10 +172,10 @@ export class ImpulseResolver {
       }
     }
 
-    // Sort by preliminary score descending
+    // Preliminary sort descending
     scoredList.sort((a, b) => b.score - a.score);
 
-    // 4. Identify Anchor Tool (Top-1) and Spreading Activation
+    // 5. Companion Tool Graph Boosting
     let primaryTool: ImpulseTool | undefined = undefined;
     const companionTools: ImpulseTool[] = [];
 
@@ -214,7 +184,6 @@ export class ImpulseResolver {
       primaryTool = anchor.tool;
       const anchorScore = anchor.score;
 
-      // Diffuse activation along outgoing graph edges from anchor
       const neighbors = this.bank.getNeighbors(anchor.tool.name);
       if (neighbors.size > 0) {
         for (const candidate of scoredList) {
@@ -222,28 +191,26 @@ export class ImpulseResolver {
 
           const edgeWeight = neighbors.get(candidate.tool.name);
           if (edgeWeight && edgeWeight > 0) {
-            const bonus = opts.mu * edgeWeight;
-            candidate.activationBonus = bonus;
+            const bonus = opts.companionBoost * edgeWeight;
+            candidate.companionBonus = bonus;
             candidate.score += bonus;
 
-            // ANCHOR PROTECTION RULE: Companions must NEVER leapfrog the primary anchor
+            // Cap companion score so it never overtakes the primary anchor
             if (candidate.score >= anchorScore) {
               candidate.score = anchorScore - 0.001;
             }
             companionTools.push(candidate.tool);
           }
         }
-
-        // Re-sort after spreading activation diffusion
         scoredList.sort((a, b) => b.score - a.score);
       }
     }
 
-    // 5. Monotone Submodular Family Diversity Selection
+    // 6. Family Diversity Filter (Prevent one provider from dominating context)
     const selected: ImpulseTool[] = [];
     const familyCounts = new Map<string, number>();
 
-    // Pass 1: Greedily pick top tools adhering to family caps and safety archetype constraints
+    // Pass 1: Select top tools respecting family caps and query safety
     for (const candidate of scoredList) {
       if (selected.length >= opts.topK) break;
       if (candidate.score < opts.minScoreThreshold) continue;
@@ -252,11 +219,11 @@ export class ImpulseResolver {
       const count = familyCounts.get(family) || 0;
 
       if (count >= opts.maxPerFamily) {
-        continue; // Enforce MAX_PER_FAMILY submodular cap
+        continue;
       }
 
-      // Safety constraint: If user is performing read/query, deprioritize destructive deletes
-      if (queryIntent === 'read' && candidate.archetype === 'delete' && candidate.score < 0.85) {
+      // Safety check: if user asked a read query, deprioritize destructive deletes
+      if (queryIntent === 'read' && candidate.verbKind === 'delete' && candidate.score < 0.85) {
         continue;
       }
 
@@ -264,7 +231,7 @@ export class ImpulseResolver {
       familyCounts.set(family, count + 1);
     }
 
-    // Pass 2: Graceful backfill if diversity constraints left slots unfilled
+    // Pass 2: Backfill if diversity constraints left slots open
     if (selected.length < opts.topK) {
       const selectedNames = new Set(selected.map((t) => t.name));
       for (const candidate of scoredList) {

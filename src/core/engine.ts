@@ -37,10 +37,12 @@ export class ToolImpulseEngine {
   }
 
   /**
-   * Register tools and compute their embeddings if an embedder is configured.
+   * Register tools and compute embeddings (if an embedder is configured).
+   * Also indexes tools into the Okapi BM25 sparse index.
    */
   public async registerTools(tools: ImpulseTool[]): Promise<void> {
     this.bank.registerTools(tools);
+    this.resolver.syncBm25Index();
 
     if (this.embedder) {
       const descriptions = tools.map((t) => `${t.name}: ${t.description} ${(t.keywords || []).join(' ')}`);
@@ -54,14 +56,15 @@ export class ToolImpulseEngine {
   }
 
   /**
-   * Synchronous tool registration without computing embeddings (runs in offline BM25 mode).
+   * Synchronous tool registration without computing embeddings (runs in fast Okapi BM25 mode).
    */
   public registerToolsSync(tools: ImpulseTool[]): void {
     this.bank.registerTools(tools);
+    this.resolver.syncBm25Index();
   }
 
   /**
-   * Provide pre-computed embeddings for registered tools.
+   * Set pre-computed embeddings for tools.
    */
   public setEmbeddings(embeddings: Map<string, Float32Array> | Record<string, Float32Array | number[]>): void {
     this.bank.setEmbeddings(embeddings);
@@ -75,8 +78,7 @@ export class ToolImpulseEngine {
   }
 
   /**
-   * Run the unconscious perceptual reflex for an incoming query.
-   * Resolves the top-K relevant tools within sub-millisecond in-memory time.
+   * Resolve the active tools for an incoming user query.
    */
   public async resolve(
     query: string,
@@ -94,7 +96,7 @@ export class ToolImpulseEngine {
   }
 
   /**
-   * Synchronous resolution if embeddings are already provided or when running in offline lexical mode.
+   * Synchronous resolution (when pre-computed embeddings exist or using BM25 lexical mode).
    */
   public resolveSync(
     query: string,
@@ -107,8 +109,7 @@ export class ToolImpulseEngine {
   }
 
   /**
-   * Online Bayesian Dirichlet-Multinomial learning from execution traces.
-   * Feeds tool co-invocation receipts into the topological graph.
+   * Record multi-tool execution telemetry to reinforce companion edges.
    */
   public recordExecution(toolsUsed: string[]): void {
     if (!toolsUsed || toolsUsed.length < 2) return;
