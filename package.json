@@ -78,6 +78,7 @@
     "test": "vitest run",
     "eval": "tsx evals/eval-suite.ts",
     "benchmark": "tsx evals/benchmark.ts",
+    "example": "tsx examples/agent-lifecycle.ts",
     "prepack": "npm run build"
   },
   "peerDependencies": {
