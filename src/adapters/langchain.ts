@@ -6,7 +6,7 @@ export interface LangChainToolLike {
   name: string;
   description: string;
   schema?: Record<string, unknown>;
-  call?: (...args: any[]) => Promise<any>;
+  call?: (...args: unknown[]) => Promise<unknown> | unknown;
   [key: string]: unknown;
 }
 

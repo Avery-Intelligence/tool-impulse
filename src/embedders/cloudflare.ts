@@ -1,7 +1,10 @@
 import { EmbeddingProvider } from '../core/types.js';
 
 export interface CloudflareAiBinding {
-  run: (model: string, input: { text: string | string[] }) => Promise<any>;
+  run: (
+    model: string,
+    input: { text: string | string[] }
+  ) => Promise<{ data?: number[][] } | number[][] | unknown>;
 }
 
 export interface CloudflareEmbedderConfig {
@@ -76,7 +79,10 @@ export class CloudflareEmbedder implements EmbeddingProvider {
 
   private async callBinding(texts: string[]): Promise<Float32Array[]> {
     const response = await this.ai!.run(this.model, { text: texts });
-    const rawData = response.data || response;
+    const rawData =
+      response && typeof response === 'object' && 'data' in response
+        ? (response as { data?: unknown }).data
+        : response;
 
     if (Array.isArray(rawData)) {
       return rawData.map((vec: number[]) => new Float32Array(vec));
