@@ -1,5 +1,6 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+import { resolveScopedTools } from './utils.js';
 
 export interface OpenAiFunctionTool {
   type: 'function';
@@ -71,8 +72,9 @@ export function createOpenAIToolFilter(
   engineOrOptions?: ToolImpulse | RouterOptions,
   maybeOptions?: RouterOptions
 ) {
-  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : undefined;
   const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+  const toolsetCache = new WeakMap<object, ToolImpulse>();
 
   return {
     async filterTools(
@@ -83,23 +85,17 @@ export function createOpenAIToolFilter(
       tools: OpenAiFunctionTool[];
       result: ToolRouteResult;
     }> {
-      const catalog = engine.getCatalog();
-      const incomingNames = allTools.map((t) => t.function.name);
-      const currentNames = catalog.getToolNames();
+      const toolDefs = fromOpenAITools(allTools);
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        allTools,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
-
-      if (isStale) {
-        if (engine.hasEmbedder()) {
-          await engine.setTools(fromOpenAITools(allTools));
-        } else {
-          engine.setToolsSync(fromOpenAITools(allTools));
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = allTools.filter((t) => allowed.has(t.function.name));
 
@@ -113,4 +109,5 @@ export function createOpenAIToolFilter(
 
 export const createOpenAiToolFilter = createOpenAIToolFilter;
 export const createGrokToolFilter = createOpenAIToolFilter;
+
 

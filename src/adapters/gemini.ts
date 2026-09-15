@@ -1,5 +1,6 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+import { resolveScopedTools } from './utils.js';
 
 export interface GeminiFunctionDeclaration {
   name: string;
@@ -69,8 +70,9 @@ export function createGeminiToolFilter(
   engineOrOptions?: ToolImpulse | RouterOptions,
   maybeOptions?: RouterOptions
 ) {
-  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : undefined;
   const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+  const toolsetCache = new WeakMap<object, ToolImpulse>();
 
   return {
     /**
@@ -84,23 +86,17 @@ export function createGeminiToolFilter(
       declarations: GeminiFunctionDeclaration[];
       result: ToolRouteResult;
     }> {
-      const catalog = engine.getCatalog();
-      const incomingNames = declarations.map((d) => d.name);
-      const currentNames = catalog.getToolNames();
+      const toolDefs = fromGeminiDeclarations(declarations);
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        declarations,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
-
-      if (isStale) {
-        if (engine.hasEmbedder()) {
-          await engine.setTools(fromGeminiDeclarations(declarations));
-        } else {
-          engine.setToolsSync(fromGeminiDeclarations(declarations));
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = declarations.filter((d) => allowed.has(d.name));
 

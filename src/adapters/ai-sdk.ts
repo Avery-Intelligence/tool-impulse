@@ -1,5 +1,6 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+import { resolveScopedTools } from './utils.js';
 
 export interface AiSdkToolRecord {
   [key: string]: {
@@ -48,8 +49,9 @@ export function createToolRouter<T extends AiSdkToolRecord>(
   engineOrOptions?: ToolImpulse | RouterOptions,
   maybeOptions?: RouterOptions
 ) {
-  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : undefined;
   const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+  const toolsetCache = new WeakMap<object, ToolImpulse>();
 
   return {
     async getTools(
@@ -72,28 +74,22 @@ export function createToolRouter<T extends AiSdkToolRecord>(
         }
       }
 
-      const catalog = engine.getCatalog();
-      const incomingNames = Object.keys(allTools);
-      const currentNames = catalog.getToolNames();
+      const toolDefs: ToolDefinition[] = Object.entries(allTools).map(([name, t]) => ({
+        name,
+        description: t.description || '',
+        parameters: t.parameters,
+      }));
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        allTools,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      if (isStale) {
-        const toolDefs: ToolDefinition[] = Object.entries(allTools).map(([name, t]) => ({
-          name,
-          description: t.description || '',
-          parameters: t.parameters,
-        }));
-        if (engine.hasEmbedder()) {
-          await engine.setTools(toolDefs);
-        } else {
-          engine.setToolsSync(toolDefs);
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const activeTools = filterTools(allTools, result.selectedNames);
 
       return {
@@ -103,3 +99,4 @@ export function createToolRouter<T extends AiSdkToolRecord>(
     },
   };
 }
+

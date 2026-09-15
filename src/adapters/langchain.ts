@@ -1,5 +1,6 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+import { resolveScopedTools } from './utils.js';
 
 export interface LangChainToolLike {
   name: string;
@@ -17,6 +18,8 @@ export function createLangChainRetriever<T extends LangChainToolLike>(
   allTools: T[],
   options?: RouterOptions
 ) {
+  const toolsetCache = new WeakMap<object, ToolImpulse>();
+
   return {
     async getTools(
       query: string,
@@ -25,28 +28,22 @@ export function createLangChainRetriever<T extends LangChainToolLike>(
       tools: T[];
       result: ToolRouteResult;
     }> {
-      const catalog = engine.getCatalog();
-      const incomingNames = allTools.map((t) => t.name);
-      const currentNames = catalog.getToolNames();
+      const toolDefs: ToolDefinition[] = allTools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.schema,
+      }));
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        allTools,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      if (isStale) {
-        const toolDefs: ToolDefinition[] = allTools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.schema,
-        }));
-        if (engine.hasEmbedder()) {
-          await engine.setTools(toolDefs);
-        } else {
-          engine.setToolsSync(toolDefs);
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = allTools.filter((t) => allowed.has(t.name));
 
@@ -61,30 +58,25 @@ export function createLangChainRetriever<T extends LangChainToolLike>(
       candidateTools: T[],
       session?: SessionState
     ): Promise<T[]> {
-      const catalog = engine.getCatalog();
-      const incomingNames = candidateTools.map((t) => t.name);
-      const currentNames = catalog.getToolNames();
+      const toolDefs: ToolDefinition[] = candidateTools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        parameters: t.schema,
+      }));
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        candidateTools,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      if (isStale) {
-        const toolDefs: ToolDefinition[] = candidateTools.map((t) => ({
-          name: t.name,
-          description: t.description,
-          parameters: t.schema,
-        }));
-        if (engine.hasEmbedder()) {
-          await engine.setTools(toolDefs);
-        } else {
-          engine.setToolsSync(toolDefs);
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       return candidateTools.filter((t) => allowed.has(t.name));
     },
   };
 }
+

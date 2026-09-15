@@ -62,7 +62,7 @@ Pure semantic search fails on exact technical strings (e.g. `JIRA-409` or `acme_
 
 Tool Impulse combines both:
 * **Dense Vectors:** Cosine similarity over normalized embeddings (Google Gemini, Cloudflare, OpenAI, or pre-computed embeddings).
-* **Sparse Lexical:** An in-memory **Okapi BM25** implementation with Robertson-Spärck Jones IDF, document length normalization (k1 = 1.2, b = 0.75), and canonical Martin Porter (1980) stemming with snake_case and camelCase tokenization.
+* **Sparse Lexical:** An in-memory **Okapi BM25** implementation with query-bounded normalization, document length normalization (k1 = 1.2, b = 0.75), and Porter stemming with snake_case and camelCase tokenization.
 
 ```
 score = alpha * cosine(queryVec, toolVec) + (1 - alpha) * bm25(query, tool)  // default alpha = 0.70
