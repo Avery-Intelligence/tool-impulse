@@ -263,14 +263,17 @@ export class OkapiBM25 {
 
   /**
    * Lexical tokenizer:
-   * 1. Splits snake_case (e.g. "stripe_refund_charge" -> "stripe refund charge").
-   * 2. Splits kebab-case (e.g. "github-merge-pr" -> "github merge pr").
-   * 3. Splits camelCase (e.g. "listInvoices" -> "list Invoices").
-   * 4. Tokenizes alphanumeric words of length >= 2.
-   * 5. Emits exactly one canonical stemmed token per word (no length inflation or double-counting).
+   * 1. Normalizes Unicode diacritics / accents (e.g. "crédit" -> "credit", "café" -> "cafe").
+   * 2. Splits snake_case (e.g. "stripe_refund_charge" -> "stripe refund charge").
+   * 3. Splits kebab-case (e.g. "github-merge-pr" -> "github merge pr").
+   * 4. Splits camelCase (e.g. "listInvoices" -> "list Invoices").
+   * 5. Tokenizes alphanumeric words of length >= 2.
+   * 6. Emits exactly one canonical stemmed token per word (no length inflation or double-counting).
    */
   public static tokenize(text: string): string[] {
     const normalized = text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
       .replace(/[_-]+/g, ' ')
       .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
       .toLowerCase();
@@ -318,7 +321,8 @@ export class OkapiBM25 {
   private computeIdf(term: string): number {
     const docFreq = this.termDocFreq.get(term) || 0;
     if (docFreq === 0) return 0;
-    return Math.log(((this.totalDocs - docFreq + 0.5) / (docFreq + 0.5)) + 1);
+    const idf = Math.log(((this.totalDocs - docFreq + 0.5) / (docFreq + 0.5)) + 1);
+    return Math.max(idf, 1e-6);
   }
 
   /**
