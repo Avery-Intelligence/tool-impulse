@@ -328,8 +328,8 @@ export class OkapiBM25 {
   /**
    * Score all indexed documents against a query string.
    * Uses query-bounded normalization: scores are scaled relative to the theoretical
-   * upper bound of the query, preventing accidental single-word matches in nonsense
-   * queries from tautologically scoring 1.0.
+   * upper bound of the query, preventing accidental single-word matches in long
+   * queries from falsely scoring 1.0.
    * Returns a map of docId -> score normalized in [0, 1].
    */
   public score(query: string): Map<string, number> {
