@@ -273,6 +273,25 @@ npm run benchmark
 
 ---
 
+## Architecture & Formal Invariants
+
+`tool-impulse` is engineered around **Eight Physical Laws (Mathematical Invariants)** verified by adversarial property testing:
+
+1. **Boundedness & Numerical Stability:** All scores strictly $\in [0.0, 1.0]$, never `NaN`, across arbitrary adversarial inputs.
+2. **Strict Noise Rejection:** Zero-overlap queries strictly evaluate to score $0.0$.
+3. **Sub-term Boundedness:** Queries with $k < N$ concept matches cannot score $1.0$.
+4. **Token Conservation:** Bijective word-to-stem emission with zero double-counting.
+5. **In-Flight Async Deduplication:** Simultaneous cold-start turns share a single embedding batch promise.
+6. **Multi-Tenant Chaos Isolation:** 100% isolation across concurrent tenant execution.
+7. **Unicode Diacritic Invariance:** Accented terms (`café`, `crédit`, `über`) match canonical stems.
+8. **Geometric Dimension Safety:** Non-finite and zero-norm vectors safely produce zero vectors.
+
+For complete mathematical formulations and architecture details, see:
+* [Architecture & Design Guide](docs/architecture.md)
+* [Mathematical Invariants & Physical Laws](docs/invariants.md)
+
+---
+
 ## License
 
 MIT © Avery Intelligence & Contributors.

@@ -76,7 +76,10 @@ export class ToolResolver {
       sumSq += val * val;
     }
 
-    const norm = Math.sqrt(sumSq) || 1e-10;
+    const norm = Math.sqrt(sumSq);
+    if (norm <= 1e-12 || !isFinite(norm)) {
+      return currentEmbedding;
+    }
     for (let i = 0; i < blended.length; i++) {
       blended[i] /= norm;
     }

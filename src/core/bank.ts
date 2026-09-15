@@ -86,6 +86,7 @@ export class ToolCatalog {
 
   /**
    * Normalize an embedding vector to unit length (L2 norm).
+   * Safe against zero-length or non-finite inputs (returns clean zero vector).
    */
   public static normalizeVector(raw: Float32Array | number[]): Float32Array {
     const vec = raw instanceof Float32Array ? raw : new Float32Array(raw);
@@ -93,8 +94,11 @@ export class ToolCatalog {
     for (let i = 0; i < vec.length; i++) {
       sumSq += vec[i] * vec[i];
     }
-    const norm = Math.sqrt(sumSq) || 1e-10;
+    const norm = Math.sqrt(sumSq);
     const normalized = new Float32Array(vec.length);
+    if (norm <= 1e-12 || !isFinite(norm)) {
+      return normalized;
+    }
     for (let i = 0; i < vec.length; i++) {
       normalized[i] = vec[i] / norm;
     }
@@ -131,18 +135,7 @@ export class ToolCatalog {
       const entry = this.entries.get(name);
       if (!entry) continue;
 
-      // Unit normalize L2 length
-      let sumSq = 0;
-      for (let i = 0; i < vec.length; i++) {
-        sumSq += vec[i] * vec[i];
-      }
-      const norm = Math.sqrt(sumSq) || 1e-10;
-      const normalized = new Float32Array(vec.length);
-      for (let i = 0; i < vec.length; i++) {
-        normalized[i] = vec[i] / norm;
-      }
-
-      entry.embedding = normalized;
+      entry.embedding = ToolCatalog.normalizeVector(vec);
     }
   }
 
@@ -196,6 +189,10 @@ export class ToolCatalog {
 
   public getTool(name: string): ToolDefinition | undefined {
     return this.entries.get(name)?.tool;
+  }
+
+  public getEntry(name: string): Readonly<ToolCatalogEntry> | undefined {
+    return this.entries.get(name);
   }
 
   public getAllTools(): ToolDefinition[] {

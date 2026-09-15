@@ -1,6 +1,8 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
 
+const initPromises = new WeakMap<object, Promise<ToolImpulse>>();
+
 /**
  * Resolves active tools against either a pre-configured base engine or an isolated,
  * cached scoped engine.
@@ -10,7 +12,9 @@ import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '..
  *    is NEVER modified or clobbered by incoming request tools.
  * 2. Multi-Tenant Concurrency Isolation: Different tool collections (Tenant A vs Tenant B)
  *    resolve against independent scoped instances in a WeakMap cache, eliminating cross-tenant data races.
- * 3. Fast Turn Latency: Repeated turns with the same tools array reference hit the WeakMap cache
+ * 3. In-Flight Async Deduplication: If concurrent requests arrive for an uninitialized toolset,
+ *    they await the same initialization promise, preventing duplicate embedding computations.
+ * 4. Fast Turn Latency: Repeated turns with the same tools array reference hit the WeakMap cache
  *    and avoid re-indexing BM25 or re-computing embeddings (<0.02ms execution).
  */
 export async function resolveScopedTools(
@@ -37,11 +41,19 @@ export async function resolveScopedTools(
 
     // If baseEngine is empty/uninitialized, initialize it directly for the base tenant
     if (baseNames.length === 0) {
-      if (baseEngine.hasEmbedder()) {
-        await baseEngine.setTools(toolDefs);
-      } else {
-        baseEngine.setToolsSync(toolDefs);
+      let initPromise = initPromises.get(baseEngine);
+      if (!initPromise) {
+        initPromise = (async () => {
+          if (baseEngine.hasEmbedder()) {
+            await baseEngine.setTools(toolDefs);
+          } else {
+            baseEngine.setToolsSync(toolDefs);
+          }
+          return baseEngine;
+        })();
+        initPromises.set(baseEngine, initPromise);
       }
+      await initPromise;
       return baseEngine.resolve(query, session, options);
     }
   }
@@ -60,20 +72,30 @@ export async function resolveScopedTools(
     }
   }
 
-  // 3. If not cached, create an isolated scoped ToolImpulse instance
+  // 3. If not cached, check if an initialization is already in flight for this toolset
   if (!scopedEngine) {
-    const embedder = baseEngine?.getEmbedder();
-    scopedEngine = new ToolImpulse({
-      tools: toolDefs,
-      embedder,
-      defaultOptions: baseEngine?.getDefaultOptions(),
-    });
-    if (embedder) {
-      await scopedEngine.setTools(toolDefs);
+    let inFlight = isCacheable ? initPromises.get(allToolsKey) : undefined;
+    if (!inFlight) {
+      inFlight = (async () => {
+        const embedder = baseEngine?.getEmbedder();
+        const instance = new ToolImpulse({
+          tools: toolDefs,
+          embedder,
+          defaultOptions: baseEngine?.getDefaultOptions(),
+        });
+        if (embedder) {
+          await instance.setTools(toolDefs);
+        }
+        if (isCacheable) {
+          toolsetCache.set(allToolsKey, instance);
+        }
+        return instance;
+      })();
+      if (isCacheable) {
+        initPromises.set(allToolsKey, inFlight);
+      }
     }
-    if (isCacheable) {
-      toolsetCache.set(allToolsKey, scopedEngine);
-    }
+    scopedEngine = await inFlight;
   }
 
   return scopedEngine.resolve(query, session, options);
