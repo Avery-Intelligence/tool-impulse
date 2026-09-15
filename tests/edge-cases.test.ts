@@ -7,7 +7,7 @@ import { ToolDefinition } from '../src/core/types.js';
 import { createToolRouter } from '../src/adapters/ai-sdk.js';
 import { createOpenAIToolFilter, OpenAiFunctionTool } from '../src/adapters/openai.js';
 
-describe('Edge Case & Invariant Regression Suite', () => {
+describe('Edge Case & Boundary Tests', () => {
   const SAMPLE_CATALOG: ToolDefinition[] = [
     { name: 'stripe_list_invoices', description: 'Retrieve customer billing invoices and payment history in Stripe', domain: 'stripe' },
     { name: 'stripe_refund_charge', description: 'Issue refund for credit card payment or transaction in Stripe', domain: 'stripe' },

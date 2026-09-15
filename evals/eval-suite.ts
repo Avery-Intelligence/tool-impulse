@@ -1,13 +1,13 @@
 /**
- * Tool Impulse Evaluation Suite
+ * Tool Impulse Scenario Evaluation
  *
- * Rigorous, honest benchmarks for in-memory dynamic tool routing:
- * 1. Okapi BM25 morphological stemming & identifier tokenization (zero query overlap in raw forms).
- * 2. Dense vector semantic matching where BM25 has zero lexical overlap.
- * 3. Multi-turn trajectory vector blending (resolving anaphora / pronoun queries).
- * 4. Companion workflow graph activation.
- * 5. Cross-domain query resolution.
- * 6. Sub-millisecond execution latency across 100 sequential runs.
+ * Validates tool routing behavior across common agent scenarios:
+ * 1. Okapi BM25 stemming and identifier tokenization
+ * 2. Dense vector semantic matching
+ * 3. Multi-turn trajectory context blending
+ * 4. Companion workflow graph activation
+ * 5. Cross-domain query resolution
+ * 6. Latency across sequential runs
  */
 
 import { ToolImpulse } from '../src/core/engine.js';

@@ -18,7 +18,6 @@ interface BenchmarkRow {
   p50Ms: number;
   p95Ms: number;
   p99Ms: number;
-  opsPerSec: number;
 }
 
 const DOMAINS = [
@@ -140,9 +139,8 @@ function runBenchmarkIteration(
   const p50 = times[Math.floor(iterations * 0.50)];
   const p95 = times[Math.floor(iterations * 0.95)];
   const p99 = times[Math.floor(iterations * 0.99)];
-  const opsPerSec = Math.round((iterations / totalMs) * 1000);
 
-  return { p50, p95, p99, opsPerSec };
+  return { p50, p95, p99 };
 }
 
 async function main() {
@@ -182,9 +180,8 @@ async function main() {
         p50Ms: stats.p50,
         p95Ms: stats.p95,
         p99Ms: stats.p99,
-        opsPerSec: stats.opsPerSec,
       });
-      console.log(`  BM25 Lexical:     P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms | ${stats.opsPerSec.toLocaleString()} ops/sec`);
+      console.log(`  BM25 Lexical:     P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms`);
     }
 
     // 2. Dense Vector (768d - Gemini / BGE-Base)
@@ -209,9 +206,8 @@ async function main() {
         p50Ms: stats.p50,
         p95Ms: stats.p95,
         p99Ms: stats.p99,
-        opsPerSec: stats.opsPerSec,
       });
-      console.log(`  Dense (768d):     P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms | ${stats.opsPerSec.toLocaleString()} ops/sec`);
+      console.log(`  Dense (768d):     P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms`);
     }
 
     // 3. Dense Vector (1536d - OpenAI text-embedding-3-small/large)
@@ -236,9 +232,8 @@ async function main() {
         p50Ms: stats.p50,
         p95Ms: stats.p95,
         p99Ms: stats.p99,
-        opsPerSec: stats.opsPerSec,
       });
-      console.log(`  Dense (1536d):    P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms | ${stats.opsPerSec.toLocaleString()} ops/sec`);
+      console.log(`  Dense (1536d):    P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms`);
     }
 
     // 4. Hybrid (BM25 + 1536d Vector + Trajectory Blending)
@@ -272,31 +267,13 @@ async function main() {
         p50Ms: stats.p50,
         p95Ms: stats.p95,
         p99Ms: stats.p99,
-        opsPerSec: stats.opsPerSec,
       });
-      console.log(`  Hybrid (1536d):   P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms | ${stats.opsPerSec.toLocaleString()} ops/sec\n`);
+      console.log(`  Hybrid (1536d):   P50: ${stats.p50.toFixed(3)}ms | P95: ${stats.p95.toFixed(3)}ms\n`);
     }
   }
 
-  console.log('================================================================================');
-  console.log(' BENCHMARK SUMMARY TABLE');
-  console.log('================================================================================');
-  console.log('| Catalog Size | Mode               | Dim   | P50 (ms) | P95 (ms) | P99 (ms) | Throughput (ops/s) |');
-  console.log('|-------------:|:-------------------|:------|---------:|---------:|---------:|-------------------:|');
-  for (const r of results) {
-    const size = r.catalogSize.toString().padStart(12, ' ');
-    const mode = r.mode.padEnd(18, ' ');
-    const dim = r.dimension.padEnd(5, ' ');
-    const p50 = r.p50Ms.toFixed(3).padStart(8, ' ');
-    const p95 = r.p95Ms.toFixed(3).padStart(8, ' ');
-    const p99 = r.p99Ms.toFixed(3).padStart(8, ' ');
-    const ops = r.opsPerSec.toLocaleString().padStart(18, ' ');
-    console.log(`| ${size} | ${mode} | ${dim} | ${p50} | ${p95} | ${p99} | ${ops} |`);
-  }
-  console.log('================================================================================\n');
-
-  // Assertions for realistic bounds (not fake microsecond claims)
-  const p95ThresholdMs = 5.0; // In-memory JS stays under 5ms even in shared virtualized CI runners at 500 tools
+  // Verify latency remains within bounds (< 5ms P95 across all catalog sizes)
+  const p95ThresholdMs = 5.0;
   for (const r of results) {
     if (r.p95Ms > p95ThresholdMs) {
       console.error(`Performance regression: ${r.mode} (${r.catalogSize} tools) P95 ${r.p95Ms.toFixed(3)}ms > ${p95ThresholdMs}ms`);
@@ -304,7 +281,7 @@ async function main() {
     }
   }
 
-  console.log(`✓ All scale benchmarks satisfied realistic latency thresholds (P95 < ${p95ThresholdMs}ms across 10-500 tools).`);
+  console.log(`✓ Latency checks passed (all P95 < ${p95ThresholdMs}ms across 10-500 tools).`);
 }
 
 main().catch((err) => {
