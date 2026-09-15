@@ -1,7 +1,7 @@
 {
   "name": "tool-impulse",
   "version": "1.0.0",
-  "description": "Fast in-memory dynamic tool router for LLM agents (BM25 + vector hybrid)",
+  "description": "Fast in-memory tool router for LLM agents using BM25 and vector search",
   "keywords": [
     "agents",
     "tools",
