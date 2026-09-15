@@ -84,9 +84,10 @@ describe('Adapters', () => {
     expect(batchCalled).toBe(true);
     expect(tools.stripe_billing).toBeDefined();
     // Verify tool embedding was stored in catalog
-    const catalogEntry = (engine.getCatalog() as any).entries.get('stripe_billing');
-    expect(catalogEntry.embedding).toBeDefined();
-    expect(catalogEntry.embedding.length).toBe(2);
+    const catalogEntry = engine.getCatalog().getEntry('stripe_billing');
+    expect(catalogEntry).toBeDefined();
+    expect(catalogEntry?.embedding).toBeDefined();
+    expect(catalogEntry?.embedding?.length).toBe(2);
     // Dense score was actively used in ranking
     expect(result.scores['stripe_billing']).toBeCloseTo(1.0);
   });

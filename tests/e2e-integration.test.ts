@@ -159,12 +159,12 @@ describe('End-to-End Production Integration Test Suite', () => {
     };
     const resB = await router.getTools('Restart failing pod', tenantBTools);
     expect(Object.keys(resB.tools)).toEqual(['k8s_restart']);
-    expect((resB.tools as any).stripe_list_invoices).toBeUndefined();
+    expect((resB.tools as Record<string, unknown>).stripe_list_invoices).toBeUndefined();
 
     // Turn 3: Tenant A returns with Billing tools
     const resA2 = await router.getTools('Refund payment', tenantATools);
     expect(Object.keys(resA2.tools)).toEqual(['stripe_refund']);
-    expect((resA2.tools as any).k8s_restart).toBeUndefined();
+    expect((resA2.tools as Record<string, unknown>).k8s_restart).toBeUndefined();
   });
 
   it('Scenario 5: Async embedder synchronization populates tool vectors and dense scoring', async () => {

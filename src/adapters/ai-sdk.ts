@@ -6,7 +6,7 @@ export interface AiSdkToolRecord {
   [key: string]: {
     description?: string;
     parameters?: Record<string, unknown>;
-    execute?: (...args: any[]) => Promise<any>;
+    execute?: (...args: unknown[]) => Promise<unknown> | unknown;
     [key: string]: unknown;
   };
 }
@@ -14,16 +14,16 @@ export interface AiSdkToolRecord {
 /**
  * Type-safe tool dictionary filter that preserves original tool types.
  */
-export function filterTools<T extends Record<string, any>>(
+export function filterTools<T extends Record<string, unknown>>(
   tools: T,
   selectedNames: string[]
 ): Partial<T> {
   const allowed = new Set(selectedNames);
   const filtered: Partial<T> = {};
 
-  for (const [name, tool] of Object.entries(tools)) {
-    if (allowed.has(name)) {
-      filtered[name as keyof T] = tool;
+  for (const name of Object.keys(tools) as Array<keyof T>) {
+    if (allowed.has(name as string)) {
+      filtered[name] = tools[name];
     }
   }
 
