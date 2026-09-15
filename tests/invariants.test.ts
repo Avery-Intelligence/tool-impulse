@@ -7,7 +7,7 @@ import { ToolDefinition } from '../src/core/types.js';
 import { createToolRouter } from '../src/adapters/ai-sdk.js';
 import { createOpenAIToolFilter, OpenAiFunctionTool } from '../src/adapters/openai.js';
 
-describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
+describe('Edge Case & Invariant Regression Suite', () => {
   const SAMPLE_CATALOG: ToolDefinition[] = [
     { name: 'stripe_list_invoices', description: 'Retrieve customer billing invoices and payment history in Stripe', domain: 'stripe' },
     { name: 'stripe_refund_charge', description: 'Issue refund for credit card payment or transaction in Stripe', domain: 'stripe' },
@@ -16,12 +16,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     { name: 'slack_send_dm', description: 'Send direct chat message to user on Slack channel', domain: 'slack' },
   ];
 
-  /**
-   * Law 1: Boundedness & Numerical Stability
-   * For ANY query string (unicode, random punctuation, ultra-long spam, empty),
-   * scores must be strictly bounded in [0.0, 1.0] and NEVER NaN or non-finite.
-   */
-  it('Law 1: Boundedness & Numerical Stability across randomized adversarial inputs', () => {
+  it('bounds scores in [0.0, 1.0] across adversarial inputs without NaN', () => {
     const engine = new ToolImpulse({ tools: SAMPLE_CATALOG });
 
     const adversarialQueries = [
@@ -54,12 +49,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     }
   });
 
-  /**
-   * Law 2: Strict Noise & Zero-Match Rejection
-   * If a query has zero lexical or semantic overlap with the corpus,
-   * every tool score must be strictly 0.0.
-   */
-  it('Law 2: Strict Noise Rejection (zero-overlap yields score 0.0)', () => {
+  it('returns 0.0 scores when query has zero lexical overlap', () => {
     const bm25 = new OkapiBM25();
     bm25.indexDocuments(
       SAMPLE_CATALOG.map((t) => ({ id: t.name, text: `${t.name} ${t.description}` }))
@@ -80,12 +70,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     }
   });
 
-  /**
-   * Law 3: Sub-term Boundedness (No Tautological 1.0 on Partial Matches)
-   * If a query has N distinct concepts and a tool matches k < N concepts,
-   * its score must be strictly less than 1.0.
-   */
-  it('Law 3: Sub-term Boundedness (k < N matches cannot score 1.0)', () => {
+  it('bounds partial concept matches strictly below 1.0', () => {
     const bm25 = new OkapiBM25();
     bm25.indexDocuments([
       { id: 'check_credit', text: 'check customer credit score' },
@@ -101,12 +86,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     expect(creditScore).toBeGreaterThan(0.1);
   });
 
-  /**
-   * Law 4: Token Conservation Law
-   * Each word tokenized must emit exactly one canonical stemmed token.
-   * No word may ever be double-counted as both raw and stemmed.
-   */
-  it('Law 4: Token Conservation (word count equals token count, no double-counting)', () => {
+  it('emits exactly one token per word without duplicates', () => {
     const testCases = [
       { text: 'invoices charges payments', expectedWordCount: 3 },
       { text: 'testing customer balances regularly', expectedWordCount: 4 },
@@ -120,12 +100,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     }
   });
 
-  /**
-   * Law 5: Concurrency & Async In-Flight Promise Deduplication
-   * When 50 concurrent requests arrive for an uninitialized toolset,
-   * the embedding calculation must execute exactly ONCE.
-   */
-  it('Law 5: In-Flight Async Deduplication (50 concurrent cold-starts trigger embedBatch once)', async () => {
+  it('deduplicates in-flight embedding requests for the same toolset', async () => {
     let batchCallCount = 0;
     const mockEmbedder = {
       dimension: 4,
@@ -160,12 +135,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     }
   });
 
-  /**
-   * Law 6: Multi-Tenant Chaos Isolation
-   * 100 interleaved requests across 5 distinct tenants executing concurrently
-   * via Promise.all must exhibit 100% isolation with zero cross-tenant catalog leakage.
-   */
-  it('Law 6: Multi-Tenant Chaos Isolation (100 concurrent requests across 5 tenants)', async () => {
+  it('keeps tool catalogs completely isolated across concurrent callers', async () => {
     const filter = createOpenAIToolFilter({ topK: 1 });
 
     const tenants: Record<string, { tools: OpenAiFunctionTool[]; query: string; expectedTool: string }> = {
@@ -225,11 +195,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     }
   });
 
-  /**
-   * Law 7: Unicode Diacritic Invariance
-   * Accented characters (e.g. café, crédit, über) must match canonical tokens.
-   */
-  it('Law 7: Unicode Diacritic Invariance (café -> cafe, crédit -> credit)', () => {
+  it('normalizes unicode diacritics to canonical stems', () => {
     const bm25 = new OkapiBM25();
     bm25.indexDocuments([
       { id: 'tool_coffee', text: 'order fresh coffee and cafe pastries' },
@@ -244,11 +210,7 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     expect(scoreCredit.get('tool_credit')).toBeGreaterThan(0.2);
   });
 
-  /**
-   * Law 8: Dimension Mismatch Protection
-   * Catalog must reject embedding vectors that do not match the initialized dimension.
-   */
-  it('Law 8: Dimension Mismatch Protection', () => {
+  it('rejects dimension mismatches and handles zero-norm vectors safely', () => {
     const catalog = new ToolCatalog();
     catalog.registerTools([{ name: 't1', description: 'tool 1' }]);
     catalog.setEmbeddings({ t1: [1, 0, 0] }); // 3d
@@ -256,5 +218,13 @@ describe('Adversarial Invariant Verification Suite (S+ Physical Laws)', () => {
     expect(() => {
       catalog.setEmbeddings({ t1: [1, 0] }); // 2d -> throws
     }).toThrow('Embedding dimension mismatch: catalog dimension is 3, but tool "t1" provided embedding of length 2.');
+
+    // Zero-norm vector should normalize to clean zeros without NaN
+    const zeroVec = ToolCatalog.normalizeVector([0, 0, 0]);
+    expect(Array.from(zeroVec)).toEqual([0, 0, 0]);
+
+    // Non-finite vector should also normalize to clean zeros
+    const nanVec = ToolCatalog.normalizeVector([NaN, Infinity, 0]);
+    expect(Array.from(nanVec)).toEqual([0, 0, 0]);
   });
 });

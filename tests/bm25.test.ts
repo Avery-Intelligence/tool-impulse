@@ -53,7 +53,7 @@ describe('OkapiBM25', () => {
     expect(scoreMerge.get('githubMergePullRequest')).toBeGreaterThan(0.4);
   });
 
-  it('does not tautologically score 1.0 on queries with accidental single-word matches or nonsense', () => {
+  it('does not falsely score 1.0 on queries with accidental single-word matches or nonsense', () => {
     const bm25 = new OkapiBM25();
     bm25.indexDocuments([
       { id: 'check_credit', text: 'check credit score balance' },

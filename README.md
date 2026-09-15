@@ -19,7 +19,7 @@ When an agent acquires dozens of tools across different services (Stripe, Jira, 
 `tool-impulse` runs in your application runtime *before* calling the model. It filters your tool catalog down to the 3–5 tools most relevant to the active turn:
 
 * **Zero external dependencies:** Pure TypeScript standard library. Runs in Node.js, Bun, Cloudflare Workers, Next.js Edge, and browser environments.
-* **Fast in-process ranking math:** Local BM25 ranking executes in **0.02ms–0.4ms** (10 to 500 tools). In-memory dense cosine scoring over 1536-dimensional vectors takes **0.03ms–1.0ms**.
+* **Sub-millisecond in-process execution:** Pure in-memory BM25 and vector math with zero database or network overhead.
 * **Handles conversational pronouns:** Blends previous turn context so follow-ups (*"now refund them"*) keep the right tools mounted.
 * **Provider diversity capping:** Caps tools per service so one large provider (e.g. 15 Stripe tools) does not crowd out secondary communication or ticketing tools.
 * **Instant serverless boot:** Supports JSON state export/import so serverless containers (Cloud Run, Lambda, Cloudflare) hydrate with $0 embedding overhead.
@@ -248,47 +248,28 @@ interface RouterOptions {
 
 ---
 
-## Benchmarks
+## Performance & Latency Realities
 
-Empirical performance measured across 200 sequential iterations per configuration (Node.js 22, Apple M-series):
+Because `tool-impulse` executes entirely in-memory over arrays, the math adds virtually no latency to an agent turn:
 
-| Catalog Size | Retrieval Mode | Vector Dim | P50 Latency | P95 Latency | Throughput |
-|---:|:---|:---|---:|---:|---:|
-| **10 tools** | BM25 Lexical | None | 0.025 ms | 0.060 ms | 32,800 ops/s |
-| **10 tools** | Dense Cosine | 1536d | 0.023 ms | 0.033 ms | 41,000 ops/s |
-| **10 tools** | Hybrid (BM25 + Dense) | 1536d | 0.030 ms | 0.039 ms | 31,300 ops/s |
-| **50 tools** | BM25 Lexical | None | 0.050 ms | 0.102 ms | 15,600 ops/s |
-| **50 tools** | Hybrid (BM25 + Dense) | 1536d | 0.084 ms | 0.095 ms | 11,700 ops/s |
-| **100 tools** | BM25 Lexical | None | 0.062 ms | 0.083 ms | 15,300 ops/s |
-| **100 tools** | Dense Cosine | 1536d | 0.151 ms | 0.186 ms | 6,200 ops/s |
-| **100 tools** | Hybrid (BM25 + Dense) | 1536d | 0.161 ms | 0.181 ms | 6,100 ops/s |
-| **500 tools** | BM25 Lexical | None | 0.394 ms | 0.439 ms | 2,500 ops/s |
-| **500 tools** | Dense Cosine | 1536d | 0.900 ms | 0.936 ms | 1,100 ops/s |
-| **500 tools** | Hybrid (BM25 + Dense) | 1536d | 1.006 ms | 1.079 ms | 980 ops/s |
+* **BM25 Lexical Ranking:** ~0.05ms for catalogs up to 100 tools.
+* **In-Memory Dense Cosine:** ~0.15ms for 100 1536-dimensional vectors.
+* **Memory Footprint:** < 1 MB for typical catalogs.
 
-*To reproduce these numbers locally:*
-```bash
-npm run benchmark
-```
+**Note on Embedding APIs:** If you use cloud embedding endpoints (e.g. OpenAI or Gemini), the HTTP round trip to fetch the query vector will take 150ms–300ms. If you need sub-millisecond end-to-end routing, stick to pure BM25 mode or run an in-process embedding model (e.g. `@xenova/transformers`).
 
 ---
 
-## Architecture & Formal Invariants
+## Architecture
 
-`tool-impulse` is engineered around **Eight Physical Laws (Mathematical Invariants)** verified by adversarial property testing:
+`tool-impulse` is designed to be lightweight, deterministic, and dependency-free:
 
-1. **Boundedness & Numerical Stability:** All scores strictly $\in [0.0, 1.0]$, never `NaN`, across arbitrary adversarial inputs.
-2. **Strict Noise Rejection:** Zero-overlap queries strictly evaluate to score $0.0$.
-3. **Sub-term Boundedness:** Queries with $k < N$ concept matches cannot score $1.0$.
-4. **Token Conservation:** Bijective word-to-stem emission with zero double-counting.
-5. **In-Flight Async Deduplication:** Simultaneous cold-start turns share a single embedding batch promise.
-6. **Multi-Tenant Chaos Isolation:** 100% isolation across concurrent tenant execution.
-7. **Unicode Diacritic Invariance:** Accented terms (`café`, `crédit`, `über`) match canonical stems.
-8. **Geometric Dimension Safety:** Non-finite and zero-norm vectors safely produce zero vectors.
+* **BM25 + Cosine Ranking:** Combines exact keyword matching with vector similarity.
+* **Trajectory Blending:** Maintains context across conversational follow-ups (*"now refund them"*).
+* **Provider Diversity:** Prevents a single tool-heavy service from crowding out other tools.
+* **Concurrency Safety:** Isolated execution per tool catalog with in-flight batch deduplication.
 
-For complete mathematical formulations and architecture details, see:
-* [Architecture & Design Guide](docs/architecture.md)
-* [Mathematical Invariants & Physical Laws](docs/invariants.md)
+For a detailed walkthrough, see the [Architecture Guide](docs/architecture.md).
 
 ---
 
