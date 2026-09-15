@@ -1,0 +1,110 @@
+{
+  "name": "tool-impulse",
+  "version": "1.0.0",
+  "description": "Fast in-memory tool router for LLM agents using BM25 and vector search",
+  "keywords": [
+    "agents",
+    "tools",
+    "tool-routing",
+    "tool-retrieval",
+    "ai-sdk",
+    "langchain",
+    "bm25",
+    "llm"
+  ],
+  "author": "Avery Intelligence",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Avery-Intelligence/tool-impulse.git"
+  },
+  "homepage": "https://github.com/Avery-Intelligence/tool-impulse#readme",
+  "bugs": {
+    "url": "https://github.com/Avery-Intelligence/tool-impulse/issues"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./adapters/ai-sdk": {
+      "types": "./dist/adapters/ai-sdk.d.ts",
+      "default": "./dist/adapters/ai-sdk.js"
+    },
+    "./adapters/openai": {
+      "types": "./dist/adapters/openai.d.ts",
+      "default": "./dist/adapters/openai.js"
+    },
+    "./adapters/langchain": {
+      "types": "./dist/adapters/langchain.d.ts",
+      "default": "./dist/adapters/langchain.js"
+    },
+    "./adapters/mcp": {
+      "types": "./dist/adapters/mcp.d.ts",
+      "default": "./dist/adapters/mcp.js"
+    },
+    "./adapters/gemini": {
+      "types": "./dist/adapters/gemini.d.ts",
+      "default": "./dist/adapters/gemini.js"
+    },
+    "./adapters/anthropic": {
+      "types": "./dist/adapters/anthropic.d.ts",
+      "default": "./dist/adapters/anthropic.js"
+    },
+    "./embedders/openai": {
+      "types": "./dist/embedders/openai.d.ts",
+      "default": "./dist/embedders/openai.js"
+    },
+    "./embedders/gemini": {
+      "types": "./dist/embedders/gemini.d.ts",
+      "default": "./dist/embedders/gemini.js"
+    },
+    "./embedders/cloudflare": {
+      "types": "./dist/embedders/cloudflare.d.ts",
+      "default": "./dist/embedders/cloudflare.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "eval": "tsx evals/eval-suite.ts",
+    "benchmark": "tsx evals/benchmark.ts",
+    "example": "tsx examples/agent-lifecycle.ts",
+    "prepack": "npm run build"
+  },
+  "peerDependencies": {
+    "@ai-sdk/provider": ">=1.0.0",
+    "@anthropic-ai/sdk": ">=0.39.0",
+    "@google/genai": ">=0.1.0",
+    "openai": ">=4.80.0"
+  },
+  "peerDependenciesMeta": {
+    "@ai-sdk/provider": {
+      "optional": true
+    },
+    "@anthropic-ai/sdk": {
+      "optional": true
+    },
+    "@google/genai": {
+      "optional": true
+    },
+    "openai": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.2",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.9"
+  }
+}

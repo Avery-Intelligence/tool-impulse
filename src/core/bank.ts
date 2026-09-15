@@ -1,0 +1,295 @@
+import { ToolCatalogState, ToolDefinition, ToolTransitionEdge } from './types.js';
+
+export interface ToolCatalogEntry {
+  tool: ToolDefinition;
+  embedding?: Float32Array;
+}
+
+export class ToolCatalog {
+  private entries: Map<string, ToolCatalogEntry> = new Map();
+  private toolNames: string[] = [];
+  private graph: Map<string, Map<string, number>> = new Map();
+  private transitionCounts: Map<string, Map<string, number>> = new Map();
+  private dimension: number = 0;
+
+  /**
+   * Infer domain namespace from tool definition or naming conventions.
+   * Supports standard delimiters (e.g. stripe_charge, github:pr, jira.issue, k8s-pod)
+   * and camelCase prefixes (stripeCreateCharge -> stripe).
+   * Returns undefined if no namespace prefix is identifiable, preventing false clumping.
+   */
+  public static inferDomain(tool: ToolDefinition): string | undefined {
+    if (tool.domain) return tool.domain;
+
+    const name = tool.name;
+    const match = name.match(/^([a-zA-Z0-9]+)[_:.-]/);
+    if (match) {
+      return match[1].toLowerCase();
+    }
+
+    const camelMatch = name.match(/^([a-z0-9]{3,})[A-Z]/);
+    if (camelMatch) {
+      return camelMatch[1].toLowerCase();
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Deterministically fingerprints a tool catalog based on names and descriptions.
+   * Enables fast caching of engine instances even when callers pass newly allocated
+   * object literals or array copies on every turn.
+   */
+  public static computeFingerprint(tools: Array<{ name: string; description?: string; domain?: string }>): string {
+    const sorted = [...tools].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    let hash = 2166136261;
+    for (let i = 0; i < sorted.length; i++) {
+      const item = sorted[i];
+      const str = `${item.name}:${item.description || ''}:${item.domain || ''}`;
+      for (let j = 0; j < str.length; j++) {
+        hash ^= str.charCodeAt(j);
+        hash = Math.imul(hash, 16777619);
+      }
+    }
+    return (hash >>> 0).toString(36) + '_' + sorted.length;
+  }
+
+  /**
+   * Register tools into the in-memory catalog.
+   * If a tool includes an embedding, it is normalized and stored.
+   */
+  public registerTools(tools: ToolDefinition[]): void {
+    for (const tool of tools) {
+      if (!this.entries.has(tool.name)) {
+        this.toolNames.push(tool.name);
+      }
+
+      const inferredDomain = ToolCatalog.inferDomain(tool);
+      const registeredTool: ToolDefinition = {
+        ...tool,
+        domain: inferredDomain,
+      };
+
+      const entry: ToolCatalogEntry = { tool: registeredTool };
+      if (tool.embedding) {
+        entry.embedding = ToolCatalog.normalizeVector(tool.embedding);
+        if (this.dimension === 0 && entry.embedding.length > 0) {
+          this.dimension = entry.embedding.length;
+        } else if (this.dimension !== 0 && entry.embedding.length !== this.dimension) {
+          throw new Error(
+            `Embedding dimension mismatch: catalog dimension is ${this.dimension}, but tool "${tool.name}" provided embedding of length ${entry.embedding.length}.`
+          );
+        }
+      }
+
+      this.entries.set(tool.name, entry);
+    }
+  }
+
+  /**
+   * Replace catalog tools with a new toolset atomically.
+   */
+  public setTools(tools: ToolDefinition[]): void {
+    this.entries.clear();
+    this.toolNames = [];
+    this.dimension = 0;
+    this.registerTools(tools);
+  }
+
+  /**
+   * Check if a tool with the given name is registered in the catalog.
+   */
+  public hasTool(name: string): boolean {
+    return this.entries.has(name);
+  }
+
+  /**
+   * Normalize an embedding vector to unit length (L2 norm).
+   * Safe against zero-length or non-finite inputs (returns clean zero vector).
+   */
+  public static normalizeVector(raw: Float32Array | number[]): Float32Array {
+    const vec = raw instanceof Float32Array ? raw : new Float32Array(raw);
+    let sumSq = 0;
+    for (let i = 0; i < vec.length; i++) {
+      sumSq += vec[i] * vec[i];
+    }
+    const norm = Math.sqrt(sumSq);
+    const normalized = new Float32Array(vec.length);
+    if (norm <= 1e-12 || !isFinite(norm)) {
+      return normalized;
+    }
+    for (let i = 0; i < vec.length; i++) {
+      normalized[i] = vec[i] / norm;
+    }
+    return normalized;
+  }
+
+  /**
+   * Clear all registered tools, embeddings, and workflow edges.
+   */
+  public clear(): void {
+    this.entries.clear();
+    this.toolNames = [];
+    this.graph.clear();
+    this.transitionCounts.clear();
+    this.dimension = 0;
+  }
+
+  /**
+   * Store pre-computed or generated vector embeddings (unit normalized).
+   */
+  public setEmbeddings(embeddings: Map<string, Float32Array> | Record<string, Float32Array | number[]>): void {
+    const items = embeddings instanceof Map ? embeddings.entries() : Object.entries(embeddings);
+
+    for (const [name, raw] of items) {
+      const vec = raw instanceof Float32Array ? raw : new Float32Array(raw);
+      if (this.dimension === 0 && vec.length > 0) {
+        this.dimension = vec.length;
+      } else if (this.dimension !== 0 && vec.length !== this.dimension) {
+        throw new Error(
+          `Embedding dimension mismatch: catalog dimension is ${this.dimension}, but tool "${name}" provided embedding of length ${vec.length}.`
+        );
+      }
+
+      const entry = this.entries.get(name);
+      if (!entry) continue;
+
+      entry.embedding = ToolCatalog.normalizeVector(vec);
+    }
+  }
+
+  /**
+   * Add directed transition edges to the companion tool workflow graph.
+   */
+  public addEdges(edges: ToolTransitionEdge[]): void {
+    for (const edge of edges) {
+      this.setEdge(edge.fromTool, edge.toTool, edge.weight);
+    }
+  }
+
+  public setEdge(fromTool: string, toTool: string, weight: number): void {
+    let neighbors = this.graph.get(fromTool);
+    if (!neighbors) {
+      neighbors = new Map();
+      this.graph.set(fromTool, neighbors);
+    }
+    neighbors.set(toTool, Math.max(0, Math.min(1.0, weight)));
+  }
+
+  /**
+   * Update workflow transition graph based on actual multi-step execution receipts.
+   */
+  public recordTransition(fromTool: string, toTool: string, priorWeight: number = 2.0): void {
+    let counts = this.transitionCounts.get(fromTool);
+    if (!counts) {
+      counts = new Map();
+      this.transitionCounts.set(fromTool, counts);
+    }
+    const count = (counts.get(toTool) || 0) + 1;
+    counts.set(toTool, count);
+
+    let total = 0;
+    for (const n of counts.values()) {
+      total += n;
+    }
+
+    const currentEdge = this.getEdgeWeight(fromTool, toTool) || 0.1;
+    const updatedWeight = (priorWeight * currentEdge + count) / (priorWeight + total);
+    this.setEdge(fromTool, toTool, updatedWeight);
+  }
+
+  public getEdgeWeight(fromTool: string, toTool: string): number {
+    return this.graph.get(fromTool)?.get(toTool) || 0.0;
+  }
+
+  public getNeighbors(toolName: string): Map<string, number> {
+    return this.graph.get(toolName) || new Map();
+  }
+
+  public getTool(name: string): ToolDefinition | undefined {
+    return this.entries.get(name)?.tool;
+  }
+
+  public getEntry(name: string): Readonly<ToolCatalogEntry> | undefined {
+    return this.entries.get(name);
+  }
+
+  public getAllTools(): ToolDefinition[] {
+    return Array.from(this.entries.values()).map((e) => e.tool);
+  }
+
+  public getToolNames(): string[] {
+    return this.toolNames;
+  }
+
+  public getDimension(): number {
+    return this.dimension;
+  }
+
+  /**
+   * Compute cosine similarity between normalized query vector and tool vector.
+   */
+  public computeCosine(queryVec: Float32Array, toolName: string): number {
+    const entry = this.entries.get(toolName);
+    if (!entry || !entry.embedding) return 0.0;
+
+    const vec = entry.embedding;
+    if (queryVec.length !== vec.length) {
+      throw new Error(
+        `Embedding dimension mismatch for tool "${toolName}": query dimension is ${queryVec.length}, but tool embedding dimension is ${vec.length}. Embeddings must share the same dimension and model.`
+      );
+    }
+
+    let dot = 0.0;
+    for (let i = 0; i < vec.length; i++) {
+      dot += queryVec[i] * vec[i];
+    }
+
+    return Math.max(0.0, Math.min(1.0, dot));
+  }
+
+  /**
+   * Export in-memory catalog, vector embeddings, and workflow graph state for serialization.
+   */
+  public exportState(): ToolCatalogState {
+    const tools = this.getAllTools();
+    const embeddings: Record<string, number[]> = {};
+
+    for (const [name, entry] of this.entries) {
+      if (entry.embedding) {
+        embeddings[name] = Array.from(entry.embedding);
+      }
+    }
+
+    const edges: ToolTransitionEdge[] = [];
+    for (const [from, toMap] of this.graph) {
+      for (const [to, weight] of toMap) {
+        edges.push({ fromTool: from, toTool: to, weight });
+      }
+    }
+
+    return {
+      version: 1,
+      tools,
+      embeddings: Object.keys(embeddings).length > 0 ? embeddings : undefined,
+      edges: edges.length > 0 ? edges : undefined,
+    };
+  }
+
+  /**
+   * Hydrate catalog, vector embeddings, and workflow graph from serialized state.
+   */
+  public importState(state: ToolCatalogState): void {
+    if (!state || !state.tools) return;
+
+    this.registerTools(state.tools);
+
+    if (state.embeddings) {
+      this.setEmbeddings(state.embeddings);
+    }
+
+    if (state.edges) {
+      this.addEdges(state.edges);
+    }
+  }
+}

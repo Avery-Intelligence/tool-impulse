@@ -1,0 +1,233 @@
+import { describe, it, expect } from 'vitest';
+import { ToolImpulse } from '../src/core/engine.js';
+import { OkapiBM25 } from '../src/core/bm25.js';
+import { ToolCatalog } from '../src/core/bank.js';
+import { ToolResolver } from '../src/core/resolver.js';
+import { ToolDefinition } from '../src/core/types.js';
+import { createToolRouter } from '../src/adapters/ai-sdk.js';
+import { createOpenAIToolFilter, OpenAiFunctionTool } from '../src/adapters/openai.js';
+
+describe('Edge Case & Boundary Tests', () => {
+  const SAMPLE_CATALOG: ToolDefinition[] = [
+    { name: 'stripe_list_invoices', description: 'Retrieve customer billing invoices and payment history in Stripe', domain: 'stripe' },
+    { name: 'stripe_refund_charge', description: 'Issue refund for credit card payment or transaction in Stripe', domain: 'stripe' },
+    { name: 'jira_create_issue', description: 'Create bug report or defect ticket in Jira backlog', domain: 'jira' },
+    { name: 'github_merge_pr', description: 'Squash and merge pull request on GitHub repository', domain: 'github' },
+    { name: 'slack_send_dm', description: 'Send direct chat message to user on Slack channel', domain: 'slack' },
+  ];
+
+  it('bounds scores in [0.0, 1.0] across adversarial inputs without NaN', () => {
+    const engine = new ToolImpulse({ tools: SAMPLE_CATALOG });
+
+    const adversarialQueries = [
+      '',
+      '   ',
+      '!@#$%^&*()_+=-~`[]{}|;:\'",.<>?/',
+      '0123456789',
+      'a',
+      'aa',
+      'café résumé über straße naïve façade',
+      'repeated '.repeat(200),
+      'stripe '.repeat(50) + 'invoice',
+      '\n\r\t\0\b',
+      '[view invoice](https://dashboard.stripe.com/inv/123?auth=bearer#heading)',
+      '{"action": "refund", "amount": 1000, "currency": "usd", "nested": {"id": "ch_123"}}',
+      'stripe\u200Binvoice\u200Frefund',
+      '\t\nstripe   \r\n\t invoice\t\n',
+      'https://api.github.com/repos/owner/repo/pulls?state=open&sort=created',
+      '🚀 ✨ 🔥 💯 🤖',
+      'кириллица русский язык',
+      '日本語 テスト クエリ',
+    ];
+
+    for (const q of adversarialQueries) {
+      const result = engine.resolveSync(q, undefined, undefined, { minScoreThreshold: 0.0 });
+      expect(result.tools.length).toBeLessThanOrEqual(3);
+
+      for (const [toolName, score] of Object.entries(result.scores)) {
+        expect(Number.isFinite(score), `Score for ${toolName} on query "${q}" must be finite`).toBe(true);
+        expect(score, `Score for ${toolName} on query "${q}" must be >= 0.0`).toBeGreaterThanOrEqual(0.0);
+        expect(score, `Score for ${toolName} on query "${q}" must be <= 1.0`).toBeLessThanOrEqual(1.0);
+      }
+    }
+  });
+
+  it('returns 0.0 scores when query has zero lexical overlap', () => {
+    const bm25 = new OkapiBM25();
+    bm25.indexDocuments(
+      SAMPLE_CATALOG.map((t) => ({ id: t.name, text: `${t.name} ${t.description}` }))
+    );
+
+    const pureNoiseQueries = [
+      'xyzzy plugh quux waldo',
+      'zztop bbbbbbb qqqqqqq',
+      '998877665544332211',
+      '!?!?!?!?!?',
+    ];
+
+    for (const q of pureNoiseQueries) {
+      const scores = bm25.score(q);
+      for (const [id, score] of scores.entries()) {
+        expect(score, `Score for ${id} on pure noise "${q}" must be 0.0`).toBe(0.0);
+      }
+    }
+  });
+
+  it('bounds partial concept matches strictly below 1.0', () => {
+    const bm25 = new OkapiBM25();
+    bm25.indexDocuments([
+      { id: 'check_credit', text: 'check customer credit score' },
+      { id: 'slack_msg', text: 'send slack notification' },
+    ]);
+
+    // 4-word query where only 1 word ('credit') matches check_credit
+    const scores = bm25.score('bananas astronaut galaxy credit');
+    const creditScore = scores.get('check_credit') || 0;
+
+    // Must be bounded well below 0.5 (specifically around 0.15 - 0.25)
+    expect(creditScore).toBeLessThan(0.3);
+    expect(creditScore).toBeGreaterThan(0.1);
+  });
+
+  it('emits exactly one token per word without duplicates', () => {
+    const testCases = [
+      { text: 'invoices charges payments', expectedWordCount: 3 },
+      { text: 'testing customer balances regularly', expectedWordCount: 4 },
+      { text: 'stripe_refund_charge github_merge_pr', expectedWordCount: 6 }, // 3 + 3 split
+      { text: 'listInvoices updateRecord', expectedWordCount: 4 }, // camelCase split
+    ];
+
+    for (const tc of testCases) {
+      const tokens = OkapiBM25.tokenize(tc.text);
+      expect(tokens.length).toBe(tc.expectedWordCount);
+    }
+  });
+
+  it('deduplicates in-flight embedding requests for the same toolset', async () => {
+    let batchCallCount = 0;
+    const mockEmbedder = {
+      dimension: 4,
+      embedQuery: async () => new Float32Array([1, 0, 0, 0]),
+      embedBatch: async (texts: string[]) => {
+        batchCallCount++;
+        // Simulate real network delay (50ms)
+        await new Promise((r) => setTimeout(r, 50));
+        return texts.map(() => new Float32Array([1, 0, 0, 0]));
+      },
+    };
+
+    const router = createToolRouter(new ToolImpulse({ embedder: mockEmbedder }), { topK: 1 });
+
+    const sharedDynamicTools = {
+      order_checkout: { description: 'Process shopping cart checkout and customer order' },
+      order_status: { description: 'Track shipment and delivery status of customer order' },
+    };
+
+    // 50 concurrent requests fired simultaneously
+    const tasks = Array.from({ length: 50 }, () =>
+      router.getTools('Check order status for package', sharedDynamicTools)
+    );
+
+    const results = await Promise.all(tasks);
+
+    // In-flight deduplication must guarantee exactly 1 batch embedding call
+    expect(batchCallCount).toBe(1);
+    expect(results.length).toBe(50);
+    for (const res of results) {
+      expect(res.result.selectedNames).toContain('order_status');
+    }
+  });
+
+  it('keeps tool catalogs completely isolated across concurrent callers', async () => {
+    const filter = createOpenAIToolFilter({ topK: 1 });
+
+    const tenants: Record<string, { tools: OpenAiFunctionTool[]; query: string; expectedTool: string }> = {
+      finance: {
+        tools: [{ type: 'function', function: { name: 'stripe_charge', description: 'Process credit card payment' } }],
+        query: 'Charge card',
+        expectedTool: 'stripe_charge',
+      },
+      devops: {
+        tools: [{ type: 'function', function: { name: 'k8s_restart', description: 'Restart kubernetes pod deployment' } }],
+        query: 'Restart pod',
+        expectedTool: 'k8s_restart',
+      },
+      sales: {
+        tools: [{ type: 'function', function: { name: 'hubspot_deal', description: 'Create sales pipeline opportunity deal' } }],
+        query: 'Create sales opportunity deal',
+        expectedTool: 'hubspot_deal',
+      },
+      support: {
+        tools: [{ type: 'function', function: { name: 'zendesk_ticket', description: 'Open customer service support ticket' } }],
+        query: 'Open customer support ticket',
+        expectedTool: 'zendesk_ticket',
+      },
+      database: {
+        tools: [{ type: 'function', function: { name: 'postgres_query', description: 'Execute SQL query against database' } }],
+        query: 'Run SQL select statement',
+        expectedTool: 'postgres_query',
+      },
+    };
+
+    const tenantKeys = Object.keys(tenants);
+
+    // Dispatch 100 interleaved concurrent requests
+    const tasks = Array.from({ length: 100 }, (_, i) => {
+      const tenantKey = tenantKeys[i % tenantKeys.length];
+      const tenant = tenants[tenantKey];
+      return filter.filterTools(tenant.query, tenant.tools).then((res) => ({
+        tenantKey,
+        res,
+      }));
+    });
+
+    const results = await Promise.all(tasks);
+
+    for (const item of results) {
+      const expected = tenants[item.tenantKey].expectedTool;
+      expect(item.res.tools.length).toBe(1);
+      expect(item.res.tools[0].function.name).toBe(expected);
+      expect(item.res.result.selectedNames).toEqual([expected]);
+
+      // Assert zero contamination from other 4 tenants
+      for (const otherKey of tenantKeys) {
+        if (otherKey !== item.tenantKey) {
+          expect(item.res.result.selectedNames).not.toContain(tenants[otherKey].expectedTool);
+        }
+      }
+    }
+  });
+
+  it('normalizes unicode diacritics to canonical stems', () => {
+    const bm25 = new OkapiBM25();
+    bm25.indexDocuments([
+      { id: 'tool_coffee', text: 'order fresh coffee and cafe pastries' },
+      { id: 'tool_credit', text: 'check credit score and balance' },
+    ]);
+
+    // Query with French/German accents
+    const scoreCafe = bm25.score('order a hot café latte');
+    expect(scoreCafe.get('tool_coffee')).toBeGreaterThan(0.2);
+
+    const scoreCredit = bm25.score('check user crédit rating');
+    expect(scoreCredit.get('tool_credit')).toBeGreaterThan(0.2);
+  });
+
+  it('rejects dimension mismatches and handles zero-norm vectors safely', () => {
+    const catalog = new ToolCatalog();
+    catalog.registerTools([{ name: 't1', description: 'tool 1' }]);
+    catalog.setEmbeddings({ t1: [1, 0, 0] }); // 3d
+
+    expect(() => {
+      catalog.setEmbeddings({ t1: [1, 0] }); // 2d -> throws
+    }).toThrow('Embedding dimension mismatch: catalog dimension is 3, but tool "t1" provided embedding of length 2.');
+
+    // Zero-norm vector should normalize to clean zeros without NaN
+    const zeroVec = ToolCatalog.normalizeVector([0, 0, 0]);
+    expect(Array.from(zeroVec)).toEqual([0, 0, 0]);
+
+    // Non-finite vector should also normalize to clean zeros
+    const nanVec = ToolCatalog.normalizeVector([NaN, Infinity, 0]);
+    expect(Array.from(nanVec)).toEqual([0, 0, 0]);
+  });
+});
