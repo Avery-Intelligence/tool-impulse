@@ -1,5 +1,6 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+import { resolveScopedTools } from './utils.js';
 
 export interface AnthropicTool {
   name: string;
@@ -14,7 +15,7 @@ export interface AnthropicTool {
 }
 
 /**
- * Convert an Anthropic tool definition into a ToolImpulse definition.
+ * Convert an Anthropic tool definition into a ToolDefinition.
  */
 export function fromAnthropicTool(tool: AnthropicTool): ToolDefinition {
   return {
@@ -29,15 +30,16 @@ export function fromAnthropicTools(tools: AnthropicTool[]): ToolDefinition[] {
 }
 
 /**
- * Convert a ToolImpulse definition into an Anthropic tool definition.
+ * Convert a ToolDefinition into an Anthropic tool.
  */
 export function toAnthropicTool(tool: ToolDefinition): AnthropicTool {
   return {
     name: tool.name,
     description: tool.description,
-    input_schema: (tool.parameters as AnthropicTool['input_schema']) || {
+    input_schema: {
       type: 'object',
-      properties: {},
+      properties: (tool.parameters?.properties as Record<string, unknown>) || {},
+      required: (tool.parameters?.required as string[]) || [],
     },
   };
 }
@@ -72,8 +74,9 @@ export function createAnthropicToolFilter(
   engineOrOptions?: ToolImpulse | RouterOptions,
   maybeOptions?: RouterOptions
 ) {
-  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : new ToolImpulse();
+  const engine = engineOrOptions instanceof ToolImpulse ? engineOrOptions : undefined;
   const options = engineOrOptions instanceof ToolImpulse ? maybeOptions : engineOrOptions;
+  const toolsetCache = new WeakMap<object, ToolImpulse>();
 
   return {
     async filterTools(
@@ -84,23 +87,17 @@ export function createAnthropicToolFilter(
       tools: AnthropicTool[];
       result: ToolRouteResult;
     }> {
-      const catalog = engine.getCatalog();
-      const incomingNames = allTools.map((t) => t.name);
-      const currentNames = catalog.getToolNames();
+      const toolDefs = fromAnthropicTools(allTools);
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        allTools,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
-
-      if (isStale) {
-        if (engine.hasEmbedder()) {
-          await engine.setTools(fromAnthropicTools(allTools));
-        } else {
-          engine.setToolsSync(fromAnthropicTools(allTools));
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const allowed = new Set(result.selectedNames);
       const filtered = allTools.filter((t) => allowed.has(t.name));
 

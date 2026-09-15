@@ -1,5 +1,6 @@
 import { ToolImpulse } from '../core/engine.js';
 import { RouterOptions, SessionState, ToolDefinition, ToolRouteResult } from '../core/types.js';
+import { resolveScopedTools } from './utils.js';
 
 export interface McpToolDefinition {
   name: string;
@@ -33,6 +34,8 @@ export function toMCPTools(tools: ToolDefinition[]): McpToolDefinition[] {
 }
 
 export function createMcpFilter(engine: ToolImpulse, options?: RouterOptions) {
+  const toolsetCache = new WeakMap<object, ToolImpulse>();
+
   return {
     /**
      * Filter a full list of MCP tool definitions down to the active turn subset.
@@ -45,23 +48,17 @@ export function createMcpFilter(engine: ToolImpulse, options?: RouterOptions) {
       tools: McpToolDefinition[];
       result: ToolRouteResult;
     }> {
-      const catalog = engine.getCatalog();
-      const incomingNames = allTools.map((t) => t.name);
-      const currentNames = catalog.getToolNames();
+      const toolDefs = fromMCPTools(allTools);
+      const result = await resolveScopedTools(
+        engine,
+        toolsetCache,
+        allTools,
+        toolDefs,
+        query,
+        session,
+        options
+      );
 
-      const isStale =
-        currentNames.length !== incomingNames.length ||
-        incomingNames.some((name) => !catalog.hasTool(name));
-
-      if (isStale) {
-        if (engine.hasEmbedder()) {
-          await engine.setTools(fromMCPTools(allTools));
-        } else {
-          engine.setToolsSync(fromMCPTools(allTools));
-        }
-      }
-
-      const result = await engine.resolve(query, session, options);
       const selectedNames = new Set(result.selectedNames);
       const filtered = allTools.filter((t) => selectedNames.has(t.name));
 
@@ -72,3 +69,4 @@ export function createMcpFilter(engine: ToolImpulse, options?: RouterOptions) {
     },
   };
 }
+
